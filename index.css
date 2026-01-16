@@ -1,4 +1,3 @@
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -13,41 +12,28 @@
   .kahrs-panel {
     @apply bg-white border border-[#E5E5E5] shadow-[0_4px_20px_rgba(0,0,0,0.03)];
   }
-  
   .serif {
     @apply font-serif;
   }
-
-  /* Kahrs Slider Style */
   .kahrs-slider {
     -webkit-appearance: none;
     @apply w-full h-[1px] bg-[#EAD8D1] outline-none my-[10px] relative;
   }
-  
   .kahrs-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
-    appearance: none;
     @apply w-[11px] h-[11px] bg-[#D2B7AC] rounded-full cursor-pointer border-none transition-transform duration-200 ease-in-out;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-  }
-  
-  .kahrs-slider::-webkit-slider-thumb:hover {
-    @apply scale-125;
-  }
-  
-  .kahrs-slider::-moz-range-thumb {
-    @apply w-[11px] h-[11px] bg-[#D2B7AC] rounded-full cursor-pointer border-none;
     box-shadow: 0 1px 3px rgba(0,0,0,0.1);
   }
 }
 
-/* Custom Scrollbar */
+/* Custom Scrollbar - dessa fungerar som vanlig CSS */
 ::-webkit-scrollbar {
   width: 4px;
 }
 ::-webkit-scrollbar-track {
-  @apply bg-[#F9F9F9];
+  background: #F9F9F9;
 }
 ::-webkit-scrollbar-thumb {
-  @apply bg-[#E0E0E0] rounded-full;
+  background: #E0E0E0;
+  border-radius: 99px;
 }
