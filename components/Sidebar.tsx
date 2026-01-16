@@ -1,7 +1,6 @@
 
 import React, { useState } from 'react';
 import { PlankSettings, Stats, ProductInfo } from '../types';
-import { GoogleGenAI, Type } from "@google/genai";
 
 interface SidebarProps {
   settings: PlankSettings;
@@ -48,9 +47,7 @@ const Sidebar: React.FC<SidebarProps> = ({ settings, setSettings, stats, onReset
   const handleChange = (key: keyof PlankSettings, val: string | number) => {
     let num = typeof val === 'string' ? parseFloat(val) : val;
     if (isNaN(num) && val !== '') return;
-    
     const finalVal = val === '' ? 0 : num;
-
     if (key === 'planksPerPackage') {
       setSettings({ ...settings, [key]: Math.max(1, Math.round(finalVal)) });
     } else {
@@ -62,31 +59,15 @@ const Sidebar: React.FC<SidebarProps> = ({ settings, setSettings, stats, onReset
     if (!productUrl) return;
     setIsFetching(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Search for this flooring product and extract its technical specifications: ${productUrl}. 
-        I need the plank length in mm, plank width in mm, the number of planks per package (pieces), and the current price per package (excluding any bulk discounts).
-        Return the data in Swedish context if possible.`,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              productName: { type: Type.STRING },
-              lengthMm: { type: Type.NUMBER },
-              widthMm: { type: Type.NUMBER },
-              planksPerPackage: { type: Type.NUMBER },
-              pricePerPackage: { type: Type.NUMBER },
-              currency: { type: Type.STRING }
-            },
-            required: ["productName", "lengthMm", "widthMm", "planksPerPackage", "pricePerPackage", "currency"]
-          }
-        }
+      // Best Practice: Anropa din egen API route istället för SDK:n direkt
+      const res = await fetch('/api/product-lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ productUrl })
       });
 
-      const data = JSON.parse(response.text);
+      if (!res.ok) throw new Error('API request failed');
+      const data = await res.json();
       
       setSettings({
         ...settings,
@@ -104,7 +85,7 @@ const Sidebar: React.FC<SidebarProps> = ({ settings, setSettings, stats, onReset
 
     } catch (error) {
       console.error("Failed to fetch product data", error);
-      alert("Kunde inte hämta produktdata automatiskt. Kontrollera URL:en eller fyll i värdena manuellt.");
+      alert("Kunde inte hämta produktdata automatiskt via servern.");
     } finally {
       setIsFetching(false);
     }
