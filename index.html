@@ -7,98 +7,11 @@
     
     <!-- Environment Shim -->
     <script>
-        // Shim process.env for browser environments to prevent crashes
         window.process = window.process || { env: { NODE_ENV: 'production' } };
-        
-        // Global error tracking for production debugging
-        window.onerror = function(message, source, lineno, colno, error) {
-            console.error('ProFloor Runtime Error:', message, 'at', source, ':', lineno);
-            // If the root is empty after a delay, we can show a fallback UI here
-            return false;
-        };
     </script>
 
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        // Tailwind Configuration
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        sans: ['Inter', 'sans-serif'],
-                        serif: ['Playfair Display', 'serif'],
-                    },
-                }
-            }
-        }
-    </script>
-    
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:wght@400;700&display=swap" rel="stylesheet">
     
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #FBFBFB;
-            color: #1A1A1A;
-            overflow: hidden;
-        }
-        .kahrs-panel {
-            background: #FFFFFF;
-            border: 1px solid #E5E5E5;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.03);
-        }
-        .serif {
-            font-family: 'Playfair Display', serif;
-        }
-        ::-webkit-scrollbar {
-            width: 4px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #F9F9F9;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #E0E0E0;
-            border-radius: 10px;
-        }
-
-        /* Kahrs Slider Style */
-        .kahrs-slider {
-            -webkit-appearance: none;
-            width: 100%;
-            height: 1px;
-            background: #EAD8D1;
-            outline: none;
-            margin: 10px 0;
-            position: relative;
-        }
-        .kahrs-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 11px;
-            height: 11px;
-            background: #D2B7AC;
-            border-radius: 50%;
-            cursor: pointer;
-            border: none;
-            transition: transform 0.2s ease-in-out;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-        .kahrs-slider::-webkit-slider-thumb:hover {
-            transform: scale(1.2);
-        }
-        .kahrs-slider::-moz-range-thumb {
-            width: 11px;
-            height: 11px;
-            background: #D2B7AC;
-            border-radius: 50%;
-            cursor: pointer;
-            border: none;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-        }
-    </style>
-
 <script type="importmap">
 {
   "imports": {

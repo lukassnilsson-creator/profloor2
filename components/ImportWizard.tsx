@@ -45,7 +45,6 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
 
   const runAIAnalysis = async (base64Image: string) => {
     try {
-      // Best Practice: Anropa din egen API route
       const res = await fetch('/api/analyze-plan', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -127,28 +126,43 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
 
   useEffect(() => {
     if (!image || !canvasRef.current) return;
-    const ctx = canvasRef.current.getContext('2d');
-    if (!ctx) return;
+    
     if (!imageRef.current) {
       const img = new Image();
       img.onload = () => { imageRef.current = img; draw(); };
       img.src = image;
-    } else { draw(); }
+    } else { 
+      draw(); 
+    }
 
     function draw() {
       const img = imageRef.current;
-      if (!img || !canvasRef.current) return;
       const canvas = canvasRef.current;
+      if (!img || !canvas) return;
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return; // TypeScript safety check
+
       const containerW = canvas.parentElement?.clientWidth || 800;
       const containerH = canvas.parentElement?.clientHeight || 600;
       const ratio = img.width / img.height;
-      let drawW = containerW; let drawH = containerW / ratio;
-      if (drawH > containerH) { drawH = containerH; drawW = containerH * ratio; }
-      canvas.width = drawW; canvas.height = drawH;
+      let drawW = containerW; 
+      let drawH = containerW / ratio;
+      
+      if (drawH > containerH) { 
+        drawH = containerH; 
+        drawW = containerH * ratio; 
+      }
+      
+      canvas.width = drawW; 
+      canvas.height = drawH;
       setImgDisplaySize({ w: drawW, h: drawH });
+      
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, drawW, drawH);
+      
       const toPx = (p: Point) => ({ x: (p.x / 1000) * drawW, y: (p.y / 1000) * drawH });
+      
       if (detectedPoints.length > 0) {
         ctx.beginPath();
         const start = toPx(detectedPoints[0]);
@@ -157,6 +171,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
         ctx.closePath();
         ctx.strokeStyle = 'rgba(210, 183, 172, 0.5)'; ctx.lineWidth = 2; ctx.stroke();
         ctx.fillStyle = 'rgba(210, 183, 172, 0.15)'; ctx.fill();
+        
         detectedPoints.forEach((p1_norm, i) => {
           const p2_norm = detectedPoints[(i + 1) % detectedPoints.length];
           const p1 = toPx(p1_norm); const p2 = toPx(p2_norm);
@@ -173,6 +188,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
             }
           }
         });
+        
         detectedPoints.forEach((p_norm, i) => {
           const pt = toPx(p_norm); ctx.beginPath();
           ctx.arc(pt.x, pt.y, isDragging === i ? 8 : 5, 0, Math.PI * 2);
