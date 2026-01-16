@@ -1,0 +1,62 @@
+
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface ProductInfo {
+  name: string;
+  pricePerPackage: number;
+  currency: string;
+  url: string;
+}
+
+export interface PlankSettings {
+  length: number; // mm
+  width: number;  // mm
+  minEndPiece: number; // mm
+  minStagger: number; // mm
+  gap: number; // mm expansion gap
+  startOffset: number; // mm - shifting the start of the first row
+  planksPerPackage: number; // pieces
+  visualContrast: number; // 0 to 1
+  originPointIdx: number; // Index of the point to start the layout from
+}
+
+export interface Stats {
+  area: number; // m2
+  plankCount: number; // total planks opened from box
+  packageCount: number; // total packages needed
+  wasteArea: number; // m2
+  wastePercent: number;
+  totalPrice?: number;
+}
+
+export interface WastePiece {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  type: 'start-cut' | 'discarded-offcut';
+}
+
+export interface PlankInstance {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  row: number;
+  isCut: boolean;
+  // Metadata for visualization
+  fullWidth: number;fullLength: number;
+  visualX: number; // The X coordinate of the physical plank start
+  isFromOffcut: boolean; // Was this piece started from a previous row's offcut?
+  sourcePlankId?: string; // ID of the plank that provided the offcut for this one
+}
+
+export interface ReferenceWall {
+  p1: Point;
+  p2: Point;
+  lengthMm: number;
+}
