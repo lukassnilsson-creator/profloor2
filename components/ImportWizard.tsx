@@ -1,9 +1,11 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Point } from '../types';
-import { getDistance, getDistanceToSegment } from '../geometry';
+import { getDistance } from '../geometry';
+import { addOrInsertPoint, deletePointAtIndex, getClosestEdgeInsertIndex, getDraggedPoint, getHoverPointIndex } from '../pointEditing';
 
 interface ImportWizardProps {
+  initialFile: File | null;
   onComplete: (points: Point[]) => void;
   onCancel: () => void;
 }
@@ -16,26 +18,65 @@ interface AISuggestion {
   };
 }
 
-const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => {
-  const [step, setStep] = useState<'upload' | 'analyze' | 'refine'>('upload');
+interface ContextMenu {
+  x: number;
+  y: number;
+  pointIdx: number;
+}
+
+const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, onCancel }) => {
+  const [step, setStep] = useState<'analyze' | 'refine'>('analyze');
   const [image, setImage] = useState<string | null>(null);
   const [detectedPoints, setDetectedPoints] = useState<Point[]>([]);
   const [selectedEdgeIdx, setSelectedEdgeIdx] = useState<number | null>(null);
-  const [hoverEdgeIdx, setHoverEdgeIdx] = useState<number | null>(null);
+  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const [closestEdgeIdx, setClosestEdgeIdx] = useState<number | null>(null);
   const [scaleValue, setScaleValue] = useState<number>(3000);
-  const [isDragging, setIsDragging] = useState<number | null>(null);
-  const [imgDisplaySize, setImgDisplaySize] = useState({ w: 0, h: 0 });
-  
+  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
+  const [snapToGrid, setSnapToGrid] = useState(false);
+  const [gridSize, setGridSize] = useState(100);
+  const [snapModifierActive, setSnapModifierActive] = useState(false);
+  const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
+  const [analysisSeconds, setAnalysisSeconds] = useState(0);
+  const [editorScale, setEditorScale] = useState(1);
+
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const analysisTimerRef = useRef<number | null>(null);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const stopAnalysisTimer = () => {
+    if (analysisTimerRef.current !== null) {
+      window.clearInterval(analysisTimerRef.current);
+      analysisTimerRef.current = null;
+    }
+  };
 
+  const startAnalysisTimer = () => {
+    stopAnalysisTimer();
+    setAnalysisSeconds(0);
+    analysisTimerRef.current = window.setInterval(() => {
+      setAnalysisSeconds(s => s + 1);
+    }, 1000);
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Shift') setSnapModifierActive(true); };
+    const handleKeyUp = (e: KeyboardEvent) => { if (e.key === 'Shift') setSnapModifierActive(false); };
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, []);
+
+  useEffect(() => () => stopAnalysisTimer(), []);
+
+  const startImportFromFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = (event) => {
       const b64 = event.target?.result as string;
+      imageRef.current = null;
       setImage(b64);
       setStep('analyze');
       runAIAnalysis(b64);
@@ -43,7 +84,17 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
     reader.readAsDataURL(file);
   };
 
+  useEffect(() => {
+    if (!initialFile) {
+      onCancel();
+      return;
+    }
+    startImportFromFile(initialFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialFile]);
+
   const runAIAnalysis = async (base64Image: string) => {
+    startAnalysisTimer();
     try {
       const res = await fetch('/api/analyze-plan', {
         method: 'POST',
@@ -69,6 +120,8 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
       console.error("AI Analysis failed", error);
       alert("Kunde inte tolka bilden via servern. Kontrollera nätverket eller försök med en annan bild.");
       onCancel();
+    } finally {
+      stopAnalysisTimer();
     }
   };
 
@@ -81,48 +134,85 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
+    if (contextMenu) { setContextMenu(null); return; }
+
     const pos = getCanvasMousePos(e);
-    const hitRadius = 25; 
-    const cornerIdx = detectedPoints.findIndex(p => getDistance(p, pos) < hitRadius);
-    if (cornerIdx !== -1) {
-      setIsDragging(cornerIdx);
-    } else {
-      let minEdgeDist = Infinity;
-      let closestEdge = -1;
-      for (let i = 0; i < detectedPoints.length; i++) {
-        const p1 = detectedPoints[i];
-        const p2 = detectedPoints[(i + 1) % detectedPoints.length];
-        const dist = getDistanceToSegment(pos, p1, p2);
-        if (dist < minEdgeDist) {
-          minEdgeDist = dist;
-          closestEdge = i;
-        }
-      }
-      if (minEdgeDist < 30) setSelectedEdgeIdx(closestEdge);
+    if (hoverIdx !== null) {
+      if (e.button === 0) setDraggingIdx(hoverIdx);
+      return;
     }
+
+    if (e.button !== 0) return;
+    const nextPoints = addOrInsertPoint(detectedPoints, pos, closestEdgeIdx, snapToGrid, gridSize);
+    if (nextPoints) {
+      setDetectedPoints(nextPoints);
+      setSelectedEdgeIdx(prev => {
+        if (prev === null) return null;
+        return Math.min(prev, nextPoints.length - 1);
+      });
+    }
+  };
+
+  const handleDeletePoint = (idx: number) => {
+    const nextPoints = deletePointAtIndex(detectedPoints, idx);
+    if (nextPoints === detectedPoints) return;
+    setDetectedPoints(nextPoints);
+    setSelectedEdgeIdx(prev => {
+      if (prev === null) return null;
+      return Math.min(prev, nextPoints.length - 1);
+    });
+    setContextMenu(null);
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
     const pos = getCanvasMousePos(e);
-    if (isDragging !== null) {
+    if (draggingIdx !== null) {
       const newPoints = [...detectedPoints];
-      newPoints[isDragging] = pos;
+      newPoints[draggingIdx] = getDraggedPoint(detectedPoints, draggingIdx, pos, snapToGrid, gridSize, snapModifierActive);
       setDetectedPoints(newPoints);
-    } else {
-      let minEdgeDist = Infinity;
-      let closestEdge = -1;
-      for (let i = 0; i < detectedPoints.length; i++) {
-        const p1 = detectedPoints[i];
-        const p2 = detectedPoints[(i + 1) % detectedPoints.length];
-        const dist = getDistanceToSegment(pos, p1, p2);
-        if (dist < minEdgeDist) {
-          minEdgeDist = dist;
-          closestEdge = i;
-        }
-      }
-      setHoverEdgeIdx(minEdgeDist < 30 ? closestEdge : null);
+      return;
     }
+
+    const nextHoverIdx = getHoverPointIndex(detectedPoints, pos, editorScale);
+    setHoverIdx(nextHoverIdx);
+    setClosestEdgeIdx(getClosestEdgeInsertIndex(detectedPoints, pos, editorScale, nextHoverIdx));
   };
+
+  useEffect(() => {
+    if (selectedEdgeIdx !== null && detectedPoints.length > 0 && selectedEdgeIdx >= detectedPoints.length) {
+      setSelectedEdgeIdx(detectedPoints.length - 1);
+    }
+  }, [detectedPoints, selectedEdgeIdx]);
+
+  useEffect(() => {
+    if (draggingIdx === null) return;
+    const handleMouseUp = () => setDraggingIdx(null);
+    window.addEventListener('mouseup', handleMouseUp);
+    return () => window.removeEventListener('mouseup', handleMouseUp);
+  }, [draggingIdx]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const closeMenu = () => setContextMenu(null);
+    window.addEventListener('click', closeMenu);
+    return () => window.removeEventListener('click', closeMenu);
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (step !== 'refine') {
+      setHoverIdx(null);
+      setClosestEdgeIdx(null);
+      setDraggingIdx(null);
+      setContextMenu(null);
+    }
+  }, [step]);
+
+  useEffect(() => {
+    if (!snapToGrid) return;
+    if (gridSize < 10) {
+      setGridSize(10);
+    }
+  }, [snapToGrid, gridSize]);
 
   useEffect(() => {
     if (!image || !canvasRef.current) return;
@@ -156,7 +246,8 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
       
       canvas.width = drawW; 
       canvas.height = drawH;
-      setImgDisplaySize({ w: drawW, h: drawH });
+      const nextEditorScale = Math.max(0.0001, Math.min(drawW, drawH) / 1000);
+      setEditorScale(prev => Math.abs(prev - nextEditorScale) > 0.0001 ? nextEditorScale : prev);
       
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, drawW, drawH);
@@ -176,28 +267,23 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
           const p2_norm = detectedPoints[(i + 1) % detectedPoints.length];
           const p1 = toPx(p1_norm); const p2 = toPx(p2_norm);
           const isSelected = selectedEdgeIdx === i;
-          const isHover = hoverEdgeIdx === i;
+          const isHover = closestEdgeIdx === i;
           if (isSelected || isHover) {
             ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y);
             ctx.strokeStyle = isSelected ? '#D2B7AC' : 'rgba(210, 183, 172, 0.8)';
             ctx.lineWidth = isSelected ? 6 : 4; ctx.stroke();
-            if (isSelected) {
-              const midX = (p1.x + p2.x) / 2; const midY = (p1.y + p2.y) / 2;
-              ctx.fillStyle = '#1A1A1A'; ctx.font = 'bold 10px Inter'; ctx.textAlign = 'center';
-              ctx.fillText(`${scaleValue} mm`, midX, midY - 10);
-            }
           }
         });
         
         detectedPoints.forEach((p_norm, i) => {
           const pt = toPx(p_norm); ctx.beginPath();
-          ctx.arc(pt.x, pt.y, isDragging === i ? 8 : 5, 0, Math.PI * 2);
-          ctx.fillStyle = isDragging === i ? '#D2B7AC' : '#1A1A1A'; ctx.fill();
+          ctx.arc(pt.x, pt.y, draggingIdx === i ? 8 : (hoverIdx === i ? 6 : 5), 0, Math.PI * 2);
+          ctx.fillStyle = draggingIdx === i ? '#D2B7AC' : '#1A1A1A'; ctx.fill();
           ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 1.5; ctx.stroke();
         });
       }
     }
-  }, [image, detectedPoints, step, selectedEdgeIdx, hoverEdgeIdx, isDragging, scaleValue]);
+  }, [image, detectedPoints, step, selectedEdgeIdx, closestEdgeIdx, draggingIdx, hoverIdx, scaleValue]);
 
   const finalize = () => {
     if (selectedEdgeIdx === null || detectedPoints.length < 3) return;
@@ -213,53 +299,118 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
     onComplete(mmPoints);
   };
 
+  const getReferenceOverlayPosition = () => {
+    if (selectedEdgeIdx === null || detectedPoints.length < 2) return null;
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+
+    const p1 = detectedPoints[selectedEdgeIdx];
+    const p2 = detectedPoints[(selectedEdgeIdx + 1) % detectedPoints.length];
+    const midX = ((p1.x + p2.x) / 2000) * canvas.width;
+    const midY = ((p1.y + p2.y) / 2000) * canvas.height;
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const edgeLength = Math.hypot(dx, dy) || 1;
+    const nx = -dy / edgeLength;
+    const ny = dx / edgeLength;
+    const labelOffset = 30;
+
+    return {
+      left: canvas.offsetLeft + midX + nx * labelOffset,
+      top: canvas.offsetTop + midY + ny * labelOffset
+    };
+  };
+
+  const referenceOverlayPos = step === 'refine' ? getReferenceOverlayPosition() : null;
+
   return (
     <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center p-4 md:p-10">
       <div className="max-w-5xl w-full h-full flex flex-col bg-white overflow-hidden shadow-2xl border border-[#E5E5E5]">
         <header className="p-6 md:p-8 border-b border-[#F1F1F1] flex justify-between items-center">
           <div>
             <h2 className="serif text-xl md:text-2xl font-bold">Importera Ritning</h2>
-            <p className="text-[9px] md:text-[10px] text-[#A0A0A0] uppercase tracking-widest mt-1">Säker AI-analys via Proxy</p>
+            <p className="text-[9px] md:text-[10px] text-[#A0A0A0] uppercase tracking-widest mt-1">Automatisk tolkning av ritning</p>
           </div>
           <button onClick={onCancel} className="text-[10px] font-bold uppercase tracking-widest text-[#A0A0A0] hover:text-[#1A1A1A]">Avbryt</button>
         </header>
 
         <div className="flex-1 overflow-hidden relative bg-[#FBFBFB] flex items-center justify-center p-4">
-          {step === 'upload' && (
-            <div className="text-center space-y-6">
-              <div className="w-16 h-16 md:w-20 md:h-20 bg-[#F1F1F1] rounded-full flex items-center justify-center mx-auto">
-                <svg className="w-8 h-8 text-[#A0A0A0]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>
-              </div>
-              <div className="space-y-2">
-                <h3 className="text-lg font-bold">Ladda upp ritning</h3>
-                <p className="text-sm text-[#888] max-w-xs mx-auto">Ladda upp en skärmdump. Din bild analyseras säkert på servern.</p>
-              </div>
-              <input type="file" accept="image/*" onChange={handleFileUpload} className="hidden" id="file-upload" />
-              <label htmlFor="file-upload" className="inline-block px-8 py-4 bg-[#1A1A1A] text-white text-[11px] font-bold uppercase tracking-widest cursor-pointer hover:bg-[#333] transition-colors">
-                Välj fil
-              </label>
-            </div>
-          )}
-
           {step === 'analyze' && (
             <div className="text-center space-y-6">
-              <div className="relative w-16 h-16 mx-auto">
+              <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
                 <div className="absolute inset-0 border-2 border-[#D2B7AC]/20 rounded-full"></div>
                 <div className="absolute inset-0 border-2 border-[#D2B7AC] border-t-transparent rounded-full animate-spin"></div>
+                <div className="relative text-[10px] font-bold text-[#1A1A1A]">{analysisSeconds}s</div>
               </div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#1A1A1A]">Anropar säker proxy...</p>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#1A1A1A]">Tolkar ritning…</p>
             </div>
           )}
 
           {step === 'refine' && (
             <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
+              <div className="absolute top-4 right-4 z-20 flex items-center gap-3 bg-white/95 border border-[#E5E5E5] px-3 py-1.5 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <span className="text-[8px] font-bold text-[#A0A0A0] uppercase tracking-widest">Grid</span>
+                  <input
+                    type="number"
+                    value={gridSize}
+                    onChange={(e) => setGridSize(Math.max(10, parseInt(e.target.value, 10) || 10))}
+                    className="w-10 h-6 bg-white border border-[#E5E5E5] text-[9px] font-bold text-center focus:outline-none focus:border-[#D2B7AC]"
+                  />
+                </div>
+                <div className="w-px h-3 bg-[#E5E5E5]"></div>
+                <button
+                  onClick={() => setSnapToGrid(!snapToGrid)}
+                  className={`flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-widest transition-colors ${snapToGrid ? 'text-[#1A1A1A]' : 'text-[#A0A0A0]'}`}
+                >
+                  <div className={`w-2.5 h-2.5 border ${snapToGrid ? 'bg-[#1A1A1A] border-[#1A1A1A]' : 'bg-white border-[#E5E5E5]'}`}></div>
+                  Snap
+                </button>
+              </div>
+
               <canvas 
                 ref={canvasRef} 
                 onMouseDown={handleCanvasMouseDown}
                 onMouseMove={handleCanvasMouseMove}
-                onMouseUp={() => setIsDragging(null)}
-                className="shadow-2xl border border-[#E5E5E5] cursor-crosshair max-w-full max-h-full object-contain"
+                onMouseUp={() => setDraggingIdx(null)}
+                onMouseLeave={() => setDraggingIdx(null)}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  if (closestEdgeIdx !== null) {
+                    setSelectedEdgeIdx(closestEdgeIdx);
+                    setContextMenu(null);
+                    return;
+                  }
+                  if (hoverIdx !== null) setContextMenu({ x: e.clientX, y: e.clientY, pointIdx: hoverIdx });
+                }}
+                className="shadow-2xl border border-[#E5E5E5] max-w-full max-h-full object-contain"
+                style={{ cursor: draggingIdx !== null ? 'grabbing' : hoverIdx !== null ? 'pointer' : closestEdgeIdx !== null ? 'copy' : 'crosshair' }}
               />
+
+              {referenceOverlayPos && (
+                <div
+                  className="absolute z-30 bg-white border border-[#D2B7AC] shadow-md px-3 py-2"
+                  style={{ left: referenceOverlayPos.left, top: referenceOverlayPos.top, transform: 'translate(-50%, -120%)' }}
+                >
+                  <label className="block text-[8px] font-bold text-[#A0A0A0] uppercase tracking-widest mb-1">Referens</label>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={scaleValue}
+                      onChange={(e) => setScaleValue(parseInt(e.target.value, 10) || 0)}
+                      className="w-20 bg-transparent border-b border-[#1A1A1A] text-[11px] font-bold text-[#1A1A1A] focus:outline-none"
+                    />
+                    <span className="text-[9px] font-bold text-[#1A1A1A] uppercase tracking-widest">mm</span>
+                  </div>
+                  <div className="text-[8px] font-bold text-[#D2B7AC] uppercase tracking-wider mt-1">Referens: {scaleValue} mm</div>
+                </div>
+              )}
+
+              {contextMenu && (
+                <div className="fixed z-50 bg-white border border-[#E5E5E5] shadow-2xl py-1 min-w-[140px]" style={{ left: contextMenu.x, top: contextMenu.y }}>
+                  <button onClick={() => handleDeletePoint(contextMenu.pointIdx)} className="w-full px-4 py-2 text-left text-[9px] font-bold uppercase tracking-widest text-red-600 hover:bg-[#FFF5F5]">Ta bort hörn</button>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -273,23 +424,11 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ onComplete, onCancel }) => 
                   <span className="text-[10px] font-bold uppercase tracking-widest text-[#1A1A1A]">Verifiera skala</span>
                 </div>
                 <p className="text-[10px] text-[#888] leading-relaxed uppercase tracking-wider">
-                  Kontrollera att AI:n hittat rätt hörn. Klicka på en linje för att ange dess verkliga längd.
+                  Dra hörn för att flytta, klicka nära kant för att lägga till hörn, högerklicka hörn för att ta bort. Hovra en kant och högerklicka för att välja referenskant.
                 </p>
               </div>
 
               <div className="flex flex-col md:flex-row items-center gap-6">
-                <div className={`flex flex-col gap-1 transition-opacity ${selectedEdgeIdx === null ? 'opacity-30' : 'opacity-100'}`}>
-                  <label className="text-[9px] font-bold text-[#A0A0A0] uppercase tracking-widest">Verklig längd (mm)</label>
-                  <div className="flex items-center gap-3 border-b-2 border-[#1A1A1A] pb-1">
-                    <input 
-                      type="number" 
-                      disabled={selectedEdgeIdx === null}
-                      value={scaleValue} 
-                      onChange={(e) => setScaleValue(parseInt(e.target.value) || 0)}
-                      className="w-24 bg-transparent text-xl font-bold focus:outline-none text-[#1A1A1A]"
-                    />
-                  </div>
-                </div>
                 <button 
                   onClick={finalize}
                   disabled={selectedEdgeIdx === null || detectedPoints.length < 3}

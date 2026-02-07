@@ -1,9 +1,9 @@
 
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Sidebar from './components/Sidebar';
 import Canvas from './components/Canvas';
 import ImportWizard from './components/ImportWizard';
-import { Point, PlankSettings, Stats, ProductInfo } from './types';
+import { Point, PlankSettings, Stats, ProductInfo, SavedProduct } from './types';
 import { calculateLayout } from './flooringEngine';
 import { getPolygonArea, getBoundingBox } from './geometry';
 
@@ -19,6 +19,31 @@ const INITIAL_SETTINGS: PlankSettings = {
   originPointIdx: 0
 };
 
+const PRODUCT_STORAGE_KEY = 'profloor.saved-products';
+
+const loadSavedProducts = (): SavedProduct[] => {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(PRODUCT_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((item: any) =>
+      item &&
+      typeof item.id === 'string' &&
+      typeof item.name === 'string' &&
+      typeof item.pricePerPackage === 'number' &&
+      typeof item.currency === 'string' &&
+      typeof item.url === 'string' &&
+      typeof item.lengthMm === 'number' &&
+      typeof item.widthMm === 'number' &&
+      typeof item.planksPerPackage === 'number'
+    );
+  } catch {
+    return [];
+  }
+};
+
 const App: React.FC = () => {
   const [points, setPoints] = useState<Point[]>([]);
   const [settings, setSettings] = useState<PlankSettings>(INITIAL_SETTINGS);
@@ -28,7 +53,15 @@ const App: React.FC = () => {
   const [gridSize, setGridSize] = useState(100);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
   const [productInfo, setProductInfo] = useState<ProductInfo | null>(null);
+  const [savedProducts, setSavedProducts] = useState<SavedProduct[]>(loadSavedProducts);
+  const [activeProductId, setActiveProductId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    localStorage.setItem(PRODUCT_STORAGE_KEY, JSON.stringify(savedProducts));
+  }, [savedProducts]);
 
   const { planks, wastePieces, totalPlanksOpened } = useMemo(() => {
     if (points.length < 3) return { planks: [], wastePieces: [], totalPlanksOpened: 0 };
@@ -63,17 +96,69 @@ const App: React.FC = () => {
     };
   }, [points, totalPlanksOpened, settings, productInfo]);
 
+  const productTotalsById = useMemo(() => {
+    const totals: Record<string, number> = {};
+    savedProducts.forEach((product) => {
+      if (points.length < 3) {
+        totals[product.id] = 0;
+        return;
+      }
+      const productSettings: PlankSettings = {
+        ...settings,
+        length: product.lengthMm,
+        width: product.widthMm,
+        planksPerPackage: product.planksPerPackage
+      };
+      const { totalPlanksOpened: productPlanksOpened } = calculateLayout(points, productSettings);
+      const packageCount = Math.ceil(productPlanksOpened / product.planksPerPackage);
+      totals[product.id] = packageCount * product.pricePerPackage;
+    });
+    return totals;
+  }, [savedProducts, points, settings]);
+
+  const activateProduct = (product: SavedProduct) => {
+    setActiveProductId(product.id);
+    setProductInfo({
+      name: product.name,
+      pricePerPackage: product.pricePerPackage,
+      currency: product.currency,
+      url: product.url
+    });
+    setSettings((prev) => ({
+      ...prev,
+      length: product.lengthMm,
+      width: product.widthMm,
+      planksPerPackage: product.planksPerPackage
+    }));
+  };
+
+  const addProduct = (product: SavedProduct) => {
+    if (savedProducts.length >= 3) return;
+    setSavedProducts((prev) => [...prev, product]);
+    activateProduct(product);
+  };
+
+  const removeProduct = (productId: string) => {
+    setSavedProducts((prev) => prev.filter((product) => product.id !== productId));
+    if (activeProductId === productId) {
+      setActiveProductId(null);
+      setProductInfo(null);
+    }
+  };
+
   const handleReset = () => {
     setPoints([]);
     setOffset({ x: 0, y: 0 });
     setScale(0.08);
     setSettings({...settings, originPointIdx: 0});
     setProductInfo(null);
+    setActiveProductId(null);
   };
 
   const handleImportComplete = (newPoints: Point[]) => {
     setPoints(newPoints);
     setIsImporting(false);
+    setImportFile(null);
     // Auto zoom extents after import
     setTimeout(handleZoomExtents, 100);
   };
@@ -119,9 +204,17 @@ const App: React.FC = () => {
           setSettings={setSettings} 
           stats={stats} 
           onReset={handleReset} 
-          onStartImport={() => setIsImporting(true)}
+          onStartImport={(file) => {
+            setImportFile(file);
+            setIsImporting(true);
+          }}
+          savedProducts={savedProducts}
+          activeProductId={activeProductId}
+          productTotalsById={productTotalsById}
+          onAddProduct={addProduct}
+          onRemoveProduct={removeProduct}
+          onSelectProduct={activateProduct}
           productInfo={productInfo}
-          setProductInfo={setProductInfo}
         />
         
         <main className="flex-1 relative flex flex-col bg-[#F9F9F9]">
@@ -207,8 +300,12 @@ const App: React.FC = () => {
 
         {isImporting && (
           <ImportWizard 
+            initialFile={importFile}
             onComplete={handleImportComplete} 
-            onCancel={() => setIsImporting(false)} 
+            onCancel={() => {
+              setIsImporting(false);
+              setImportFile(null);
+            }}
           />
         )}
       </div>

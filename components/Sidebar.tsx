@@ -1,15 +1,20 @@
 
-import React, { useState } from 'react';
-import { PlankSettings, Stats, ProductInfo } from '../types';
+import React, { useRef, useState } from 'react';
+import { PlankSettings, Stats, ProductInfo, SavedProduct } from '../types';
 
 interface SidebarProps {
   settings: PlankSettings;
   setSettings: (s: PlankSettings) => void;
   stats: Stats;
   onReset: () => void;
-  onStartImport: () => void;
+  onStartImport: (file: File) => void;
+  savedProducts: SavedProduct[];
+  activeProductId: string | null;
+  productTotalsById: Record<string, number>;
+  onAddProduct: (product: SavedProduct) => void;
+  onRemoveProduct: (productId: string) => void;
+  onSelectProduct: (product: SavedProduct) => void;
   productInfo: ProductInfo | null;
-  setProductInfo: (info: ProductInfo | null) => void;
 }
 
 const KahrsInput: React.FC<{
@@ -40,9 +45,35 @@ const KahrsInput: React.FC<{
   </div>
 );
 
-const Sidebar: React.FC<SidebarProps> = ({ settings, setSettings, stats, onReset, onStartImport, productInfo, setProductInfo }) => {
+const Sidebar: React.FC<SidebarProps> = ({
+  settings,
+  setSettings,
+  stats,
+  onReset,
+  onStartImport,
+  savedProducts,
+  activeProductId,
+  productTotalsById,
+  onAddProduct,
+  onRemoveProduct,
+  onSelectProduct,
+  productInfo
+}) => {
   const [productUrl, setProductUrl] = useState('');
   const [isFetching, setIsFetching] = useState(false);
+  const [isDragActive, setIsDragActive] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+
+  const supportedImportMimeTypes = ['image/png', 'image/jpeg', 'application/pdf'];
+
+  const startImportFromFile = (file: File | undefined) => {
+    if (!file) return;
+    if (supportedImportMimeTypes.includes(file.type) || /\.(png|jpe?g|pdf)$/i.test(file.name)) {
+      onStartImport(file);
+      return;
+    }
+    alert('Filformat stöds inte. Välj PNG, JPG eller PDF.');
+  };
 
   const handleChange = (key: keyof PlankSettings, val: string | number) => {
     let num = typeof val === 'string' ? parseFloat(val) : val;
@@ -56,7 +87,7 @@ const Sidebar: React.FC<SidebarProps> = ({ settings, setSettings, stats, onReset
   };
 
   const fetchProductData = async () => {
-    if (!productUrl) return;
+    if (!productUrl || savedProducts.length >= 3) return;
     setIsFetching(true);
     try {
       // Best Practice: Anropa din egen API route istället för SDK:n direkt
@@ -69,19 +100,19 @@ const Sidebar: React.FC<SidebarProps> = ({ settings, setSettings, stats, onReset
       if (!res.ok) throw new Error('API request failed');
       const data = await res.json();
       
-      setSettings({
-        ...settings,
-        length: data.lengthMm,
-        width: data.widthMm,
-        planksPerPackage: data.planksPerPackage,
-      });
-
-      setProductInfo({
+      const fetchedProduct: SavedProduct = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         name: data.productName,
         pricePerPackage: data.pricePerPackage,
         currency: data.currency,
-        url: productUrl
-      });
+        url: productUrl,
+        lengthMm: data.lengthMm,
+        widthMm: data.widthMm,
+        planksPerPackage: data.planksPerPackage
+      };
+
+      onAddProduct(fetchedProduct);
+      setProductUrl('');
 
     } catch (error) {
       console.error("Failed to fetch product data", error);
@@ -93,6 +124,7 @@ const Sidebar: React.FC<SidebarProps> = ({ settings, setSettings, stats, onReset
 
   const maxOffset = Math.max(0, settings.length - settings.minEndPiece);
   const maxMinPiece = Math.max(0, settings.length / 2);
+  const isProductLimitReached = savedProducts.length >= 3;
 
   return (
     <div className="w-80 h-full bg-white flex flex-col overflow-y-auto border-r border-[#E5E5E5] px-8 py-10">
@@ -114,28 +146,98 @@ const Sidebar: React.FC<SidebarProps> = ({ settings, setSettings, stats, onReset
                onChange={(e) => setProductUrl(e.target.value)}
                className="w-full bg-white border border-[#E5E5E5] px-3 py-2 text-[10px] focus:outline-none focus:border-[#D2B7AC] transition"
              />
-             <button 
-               onClick={fetchProductData}
-               disabled={isFetching || !productUrl}
-               className="w-full py-3 bg-[#D2B7AC] text-white text-[10px] font-bold uppercase tracking-[0.15em] hover:bg-[#C5A599] transition-colors disabled:opacity-50"
-             >
-               {isFetching ? 'Hämtar data...' : 'Hämta Produktdata'}
-             </button>
-             {productInfo && (
-               <div className="pt-1">
-                 <p className="text-[9px] font-bold text-[#1A1A1A] line-clamp-1">{productInfo.name}</p>
-                 <p className="text-[9px] text-[#A0A0A0]">{productInfo.pricePerPackage} {productInfo.currency} / pkt</p>
-               </div>
-             )}
-          </div>
+	             <button 
+	               onClick={fetchProductData}
+	               disabled={isFetching || !productUrl || isProductLimitReached}
+	               className="w-full py-3 bg-[#D2B7AC] text-white text-[10px] font-bold uppercase tracking-[0.15em] hover:bg-[#C5A599] transition-colors disabled:opacity-50"
+	             >
+	               {isFetching ? 'Hämtar data...' : 'Hämta Produktdata'}
+	             </button>
+               {isProductLimitReached && (
+                 <p className="text-[9px] text-[#A0A0A0] leading-relaxed">
+                   Du kan ha max 3 produkter. Ta bort en för att lägga till en ny.
+                 </p>
+               )}
+               {savedProducts.length > 0 && (
+                 <div className="space-y-2 pt-1">
+                   {savedProducts.map((product) => {
+                     const totalPrice = productTotalsById[product.id] ?? 0;
+                     const isActive = activeProductId === product.id;
+                     return (
+                       <div
+                         key={product.id}
+                         role="button"
+                         tabIndex={0}
+                         onClick={() => onSelectProduct(product)}
+                         onKeyDown={(e) => {
+                           if (e.key === 'Enter' || e.key === ' ') {
+                             e.preventDefault();
+                             onSelectProduct(product);
+                           }
+                         }}
+                         className={`w-full text-left border px-2.5 py-2 transition-colors cursor-pointer ${isActive ? 'border-[#D2B7AC] bg-white' : 'border-[#E5E5E5] bg-[#FBFBFB] hover:bg-white'}`}
+                       >
+                         <div className="flex items-start justify-between gap-2">
+                           <div className="min-w-0">
+                             <p className="text-[9px] font-bold text-[#1A1A1A] truncate">{product.name}</p>
+                             <p className="text-[9px] text-[#A0A0A0]">{product.pricePerPackage} {product.currency} / pkt</p>
+                           </div>
+                           <div className="flex items-center gap-2 shrink-0">
+                             <p className="text-[9px] font-bold text-[#1A1A1A] text-right">
+                               {Math.round(totalPrice).toLocaleString()} {product.currency}
+                             </p>
+                             <button
+                               type="button"
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 onRemoveProduct(product.id);
+                               }}
+                               className="w-4 h-4 text-[10px] leading-none text-[#A0A0A0] hover:text-[#1A1A1A]"
+                               aria-label={`Ta bort ${product.name}`}
+                             >
+                               ×
+                             </button>
+                           </div>
+                         </div>
+                       </div>
+                     );
+                   })}
+                 </div>
+               )}
+	          </div>
 
-          <button 
-            onClick={onStartImport}
-            className="w-full py-4 bg-white border border-[#D2B7AC] text-[#D2B7AC] text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#FDF9F8] transition-colors flex items-center justify-center gap-2"
+          <div
+            onDragEnter={(e) => { e.preventDefault(); setIsDragActive(true); }}
+            onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }}
+            onDragLeave={(e) => {
+              e.preventDefault();
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setIsDragActive(false);
+            }}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDragActive(false);
+              startImportFromFile(e.dataTransfer.files?.[0]);
+            }}
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-            Importera Ritning
-          </button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
+              className="hidden"
+              onChange={(e) => {
+                startImportFromFile(e.target.files?.[0]);
+                e.currentTarget.value = '';
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => importInputRef.current?.click()}
+              className={`w-full py-4 bg-white border text-[11px] font-bold uppercase tracking-[0.2em] transition-colors flex items-center justify-center gap-2 ${isDragActive ? 'border-[#1A1A1A] text-[#1A1A1A] bg-[#FDF9F8]' : 'border-[#D2B7AC] text-[#D2B7AC] hover:bg-[#FDF9F8]'}`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+              Importera Ritning
+            </button>
+          </div>
 
           <div className="space-y-8">
             <div>

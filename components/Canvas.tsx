@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import { Point, PlankSettings, PlankInstance, WastePiece } from '../types';
-import { getDistance, isGeometricallyPossible, movePointByLength, findClosestEdge, snapToAngle, isPointInPolygon } from '../geometry';
+import { getDistance, movePointByLength, isPointInPolygon } from '../geometry';
+import { addOrInsertPoint, deletePointAtIndex, getClosestEdgeInsertIndex, getDraggedPoint, getHoverPointIndex } from '../pointEditing';
 
 interface CanvasProps {
   points: Point[];
@@ -223,15 +224,14 @@ const Canvas: React.FC<CanvasProps> = ({
     
     const canvas = canvasRef.current; if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
-    let mx = (e.clientX - rect.left - canvas.width / 2 - offset.x) / scale;
-    let my = (e.clientY - rect.top - canvas.height / 2 - offset.y) / scale;
+    const mx = (e.clientX - rect.left - canvas.width / 2 - offset.x) / scale;
+    const my = (e.clientY - rect.top - canvas.height / 2 - offset.y) / scale;
+    const cursor = { x: mx, y: my };
 
     if (e.button === 0) {
-      if (points.length < 4) {
-        const snapped = snapToGrid ? { x: Math.round(mx / gridSize) * gridSize, y: Math.round(my / gridSize) * gridSize } : { x: mx, y: my };
-        setPoints([...points, snapped]);
-      } else if (closestEdgeIdx !== null) {
-        const n = [...points]; n.splice(closestEdgeIdx + 1, 0, { x: mx, y: my }); setPoints(n);
+      const nextPoints = addOrInsertPoint(points, cursor, closestEdgeIdx, snapToGrid, gridSize);
+      if (nextPoints) {
+        setPoints(nextPoints);
       } else {
         setIsPanning(true); setLastPanPos({ x: e.clientX, y: e.clientY });
       }
@@ -249,43 +249,33 @@ const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
-    let mx = (e.clientX - rect.left - canvas.width / 2 - offset.x) / scale;
-    let my = (e.clientY - rect.top - canvas.height / 2 - offset.y) / scale;
+    const mx = (e.clientX - rect.left - canvas.width / 2 - offset.x) / scale;
+    const my = (e.clientY - rect.top - canvas.height / 2 - offset.y) / scale;
+    const cursor = { x: mx, y: my };
 
     if (draggingIdx !== null) {
       const n = [...points];
-      let nx = mx, ny = my;
-      if (snapToGrid) { nx = Math.round(mx / gridSize) * gridSize; ny = Math.round(my / gridSize) * gridSize; }
-      if (snapModifierActive) {
-        const prev = points[(draggingIdx - 1 + points.length) % points.length];
-        const snapped = snapToAngle({ x: nx, y: ny }, prev);
-        nx = snapped.x; ny = snapped.y;
-      }
-      n[draggingIdx] = { x: nx, y: ny };
+      n[draggingIdx] = getDraggedPoint(points, draggingIdx, cursor, snapToGrid, gridSize, snapModifierActive);
       setPoints(n);
       return;
     }
 
     // Hover-logik
-    let foundIdx = null;
-    for (let i = 0; i < points.length; i++) if (getDistance({ x: mx, y: my }, points[i]) < 12 / scale) { foundIdx = i; break; }
+    const foundIdx = getHoverPointIndex(points, cursor, scale);
     setHoverIdx(foundIdx);
 
     let foundPlank = null;
-    if (points.length >= 3 && !foundIdx) {
+    if (points.length >= 3 && foundIdx === null) {
       for (const p of planks) if (mx >= p.x && mx <= p.x + p.w && my >= p.y && my <= p.y + p.h) { foundPlank = p; break; }
     }
     setHoverPlank(foundPlank);
 
-    if (points.length >= 4 && foundIdx === null) {
-      const edge = findClosestEdge({ x: mx, y: my }, points);
-      setClosestEdgeIdx(edge.distance < 25 / scale ? edge.index : null);
-    } else setClosestEdgeIdx(null);
+    setClosestEdgeIdx(getClosestEdgeInsertIndex(points, cursor, scale, foundIdx));
   };
 
   const deletePoint = (idx: number) => {
-    if (points.length <= 3) return;
-    const n = points.filter((_, i) => i !== idx);
+    const n = deletePointAtIndex(points, idx);
+    if (n === points) return;
     setPoints(n);
     if (settings.originPointIdx === idx) setSettings({...settings, originPointIdx: 0});
     setContextMenu(null);

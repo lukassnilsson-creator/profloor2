@@ -11,6 +11,17 @@ export interface ProductInfo {
   url: string;
 }
 
+export interface SavedProduct {
+  id: string;
+  name: string;
+  pricePerPackage: number;
+  currency: string;
+  url: string;
+  lengthMm: number;
+  widthMm: number;
+  planksPerPackage: number;
+}
+
 export interface PlankSettings {
   length: number; // mm
   width: number;  // mm
