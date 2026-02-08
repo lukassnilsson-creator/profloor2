@@ -1,13 +1,46 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-export default async function handler(req: any, res: any) {
+interface ApiRequest {
+  method?: string;
+  body?: unknown;
+}
+
+interface ApiResponse {
+  status: (statusCode: number) => {
+    json: (payload: unknown) => void;
+  };
+}
+
+interface ErrorLike {
+  status?: unknown;
+  message?: unknown;
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object';
+
+const getErrorInfo = (error: unknown) => {
+  const parsed = (isRecord(error) ? error : {}) as ErrorLike;
+  const status = typeof parsed.status === 'number' ? parsed.status : null;
+  const statusText = String(parsed.status ?? '').toUpperCase();
+  const messageText = String(parsed.message ?? '').toUpperCase();
+  const isUnavailableError =
+    status === 503 ||
+    statusText === '503' ||
+    statusText === 'UNAVAILABLE' ||
+    messageText.includes('UNAVAILABLE');
+  return { isUnavailableError };
+};
+
+export default async function handler(req: ApiRequest, res: ApiResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { image } = req.body;
-  if (!image || typeof image !== 'string') {
+  const body = isRecord(req.body) ? req.body : {};
+  const image = body.image;
+  if (typeof image !== 'string' || !image) {
     return res.status(400).json({ error: 'Missing image data' });
   }
 
@@ -22,7 +55,10 @@ export default async function handler(req: any, res: any) {
   try {
     const apiKey = process.env.GEMINI_API_KEY ?? process.env.API_KEY;
     if (!apiKey) {
-      return res.status(500).json({ error: 'Server configuration error: GEMINI_API_KEY is missing (API_KEY fallback is also unset).' });
+      return res.status(500).json({
+        error: 'Server configuration error: GEMINI_API_KEY is missing (API_KEY fallback is also unset).',
+        code: 'MISSING_API_KEY'
+      });
     }
 
     const ai = new GoogleGenAI({ apiKey });
@@ -78,24 +114,23 @@ export default async function handler(req: any, res: any) {
       try {
         const response = await ai.models.generateContent(requestPayload);
         return res.status(200).json(JSON.parse(response.text));
-      } catch (error: any) {
-        const status = error?.status;
-        const statusText = String(status ?? '').toUpperCase();
-        const messageText = String(error?.message ?? '').toUpperCase();
-        const isUnavailableError =
-          status === 503 ||
-          statusText === '503' ||
-          statusText === 'UNAVAILABLE' ||
-          messageText.includes('UNAVAILABLE');
-
+      } catch (error: unknown) {
+        const { isUnavailableError } = getErrorInfo(error);
         const isLastAttempt = attempt === retryDelaysMs.length - 1;
-        if (!isUnavailableError || isLastAttempt) {
+        if (isUnavailableError && isLastAttempt) {
+          console.error("Gemini Analysis Error after retries (UNAVAILABLE):", error);
+          return res.status(503).json({
+            error: 'Analystjänsten är tillfälligt otillgänglig. Försök igen om en stund.',
+            code: 'UNAVAILABLE'
+          });
+        }
+        if (!isUnavailableError) {
           throw error;
         }
       }
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Gemini Analysis Error:", error);
-    return res.status(500).json({ error: 'Failed to analyze plan' });
+    return res.status(500).json({ error: 'Failed to analyze plan', code: 'INTERNAL_ERROR' });
   }
 }

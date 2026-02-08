@@ -2,7 +2,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Point } from '../types';
 import { getDistance } from '../geometry';
-import { addOrInsertPoint, deletePointAtIndex, getClosestEdgeInsertIndex, getDraggedPoint, getHoverPointIndex } from '../pointEditing';
+import { usePlanEditor } from '../hooks/usePlanEditor';
 
 interface ImportWizardProps {
   initialFile: File | null;
@@ -29,16 +29,13 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
   const [image, setImage] = useState<string | null>(null);
   const [detectedPoints, setDetectedPoints] = useState<Point[]>([]);
   const [selectedEdgeIdx, setSelectedEdgeIdx] = useState<number | null>(null);
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
-  const [closestEdgeIdx, setClosestEdgeIdx] = useState<number | null>(null);
   const [scaleValue, setScaleValue] = useState<number>(3000);
-  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [gridSize, setGridSize] = useState(100);
-  const [snapModifierActive, setSnapModifierActive] = useState(false);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [analysisSeconds, setAnalysisSeconds] = useState(0);
   const [editorScale, setEditorScale] = useState(1);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
@@ -59,16 +56,22 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
     }, 1000);
   };
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Shift') setSnapModifierActive(true); };
-    const handleKeyUp = (e: KeyboardEvent) => { if (e.key === 'Shift') setSnapModifierActive(false); };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
+  const {
+    hoverIdx,
+    closestEdgeIdx,
+    draggingIdx,
+    handlePrimaryDown,
+    handlePointerMove,
+    handlePointerUp,
+    deletePoint,
+    clearInteractionState
+  } = usePlanEditor({
+    points: detectedPoints,
+    setPoints: setDetectedPoints,
+    snapToGrid,
+    gridSize,
+    interactionScale: editorScale
+  });
 
   useEffect(() => () => stopAnalysisTimer(), []);
 
@@ -79,6 +82,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
       imageRef.current = null;
       setImage(b64);
       setStep('analyze');
+      setAnalysisError(null);
       runAIAnalysis(b64);
     };
     reader.readAsDataURL(file);
@@ -95,6 +99,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
 
   const runAIAnalysis = async (base64Image: string) => {
     startAnalysisTimer();
+    setAnalysisError(null);
     try {
       const res = await fetch('/api/analyze-plan', {
         method: 'POST',
@@ -102,7 +107,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
         body: JSON.stringify({ image: base64Image })
       });
 
-      if (!res.ok) throw new Error('AI analysis failed on server');
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        throw new Error(payload?.error || 'Kunde inte tolka ritningen just nu.');
+      }
       const result: AISuggestion = await res.json();
       
       const initialPoints = result.points.map(p => ({ x: p.x, y: p.y }));
@@ -118,8 +126,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
       setStep('refine');
     } catch (error) {
       console.error("AI Analysis failed", error);
-      alert("Kunde inte tolka bilden via servern. Kontrollera nätverket eller försök med en annan bild.");
-      onCancel();
+      setAnalysisError(error instanceof Error ? error.message : 'Kunde inte tolka ritningen. Försök igen.');
     } finally {
       stopAnalysisTimer();
     }
@@ -136,46 +143,17 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (contextMenu) { setContextMenu(null); return; }
 
-    const pos = getCanvasMousePos(e);
-    if (hoverIdx !== null) {
-      if (e.button === 0) setDraggingIdx(hoverIdx);
-      return;
-    }
-
     if (e.button !== 0) return;
-    const nextPoints = addOrInsertPoint(detectedPoints, pos, closestEdgeIdx, snapToGrid, gridSize);
-    if (nextPoints) {
-      setDetectedPoints(nextPoints);
-      setSelectedEdgeIdx(prev => {
-        if (prev === null) return null;
-        return Math.min(prev, nextPoints.length - 1);
-      });
-    }
+    handlePrimaryDown(getCanvasMousePos(e));
   };
 
   const handleDeletePoint = (idx: number) => {
-    const nextPoints = deletePointAtIndex(detectedPoints, idx);
-    if (nextPoints === detectedPoints) return;
-    setDetectedPoints(nextPoints);
-    setSelectedEdgeIdx(prev => {
-      if (prev === null) return null;
-      return Math.min(prev, nextPoints.length - 1);
-    });
+    deletePoint(idx);
     setContextMenu(null);
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent) => {
-    const pos = getCanvasMousePos(e);
-    if (draggingIdx !== null) {
-      const newPoints = [...detectedPoints];
-      newPoints[draggingIdx] = getDraggedPoint(detectedPoints, draggingIdx, pos, snapToGrid, gridSize, snapModifierActive);
-      setDetectedPoints(newPoints);
-      return;
-    }
-
-    const nextHoverIdx = getHoverPointIndex(detectedPoints, pos, editorScale);
-    setHoverIdx(nextHoverIdx);
-    setClosestEdgeIdx(getClosestEdgeInsertIndex(detectedPoints, pos, editorScale, nextHoverIdx));
+    handlePointerMove(getCanvasMousePos(e));
   };
 
   useEffect(() => {
@@ -183,13 +161,6 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
       setSelectedEdgeIdx(detectedPoints.length - 1);
     }
   }, [detectedPoints, selectedEdgeIdx]);
-
-  useEffect(() => {
-    if (draggingIdx === null) return;
-    const handleMouseUp = () => setDraggingIdx(null);
-    window.addEventListener('mouseup', handleMouseUp);
-    return () => window.removeEventListener('mouseup', handleMouseUp);
-  }, [draggingIdx]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -200,9 +171,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
 
   useEffect(() => {
     if (step !== 'refine') {
-      setHoverIdx(null);
-      setClosestEdgeIdx(null);
-      setDraggingIdx(null);
+      clearInteractionState();
       setContextMenu(null);
     }
   }, [step]);
@@ -337,12 +306,33 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
         <div className="flex-1 overflow-hidden relative bg-[#FBFBFB] flex items-center justify-center p-4">
           {step === 'analyze' && (
             <div className="text-center space-y-6">
-              <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
-                <div className="absolute inset-0 border-2 border-[#D2B7AC]/20 rounded-full"></div>
-                <div className="absolute inset-0 border-2 border-[#D2B7AC] border-t-transparent rounded-full animate-spin"></div>
-                <div className="relative text-[10px] font-bold text-[#1A1A1A]">{analysisSeconds}s</div>
-              </div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#1A1A1A]">Tolkar ritning…</p>
+              {!analysisError && (
+                <>
+                  <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
+                    <div className="absolute inset-0 border-2 border-[#D2B7AC]/20 rounded-full"></div>
+                    <div className="absolute inset-0 border-2 border-[#D2B7AC] border-t-transparent rounded-full animate-spin"></div>
+                    <div className="relative text-[10px] font-bold text-[#1A1A1A]">{analysisSeconds}s</div>
+                  </div>
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#1A1A1A]">Tolkar ritning…</p>
+                </>
+              )}
+              {analysisError && (
+                <div className="space-y-3 max-w-md">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-red-600">Kunde inte tolka ritningen</p>
+                  <p className="text-[10px] text-[#666] leading-relaxed">{analysisError}</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (image) {
+                        runAIAnalysis(image);
+                      }
+                    }}
+                    className="px-6 py-2 bg-[#1A1A1A] text-white text-[10px] font-bold uppercase tracking-widest hover:bg-[#333] transition-colors"
+                  >
+                    Försök igen
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
@@ -372,8 +362,8 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
                 ref={canvasRef} 
                 onMouseDown={handleCanvasMouseDown}
                 onMouseMove={handleCanvasMouseMove}
-                onMouseUp={() => setDraggingIdx(null)}
-                onMouseLeave={() => setDraggingIdx(null)}
+                onMouseUp={handlePointerUp}
+                onMouseLeave={handlePointerUp}
                 onContextMenu={(e) => {
                   e.preventDefault();
                   if (closestEdgeIdx !== null) {

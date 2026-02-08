@@ -1,7 +1,7 @@
-import React, { useRef, useEffect, useState, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Point, PlankSettings, PlankInstance, WastePiece } from '../types';
 import { getDistance, movePointByLength, isPointInPolygon } from '../geometry';
-import { addOrInsertPoint, deletePointAtIndex, getClosestEdgeInsertIndex, getDraggedPoint, getHoverPointIndex } from '../pointEditing';
+import { usePlanEditor } from '../hooks/usePlanEditor';
 
 interface CanvasProps {
   points: Point[];
@@ -11,6 +11,7 @@ interface CanvasProps {
   planks: PlankInstance[];
   wastePieces: WastePiece[];
   scale: number;
+  setScale: (scale: number) => void;
   offset: { x: number, y: number };
   setOffset: (off: { x: number, y: number }) => void;
   showEdgeLengths: boolean;
@@ -24,21 +25,27 @@ interface ContextMenu {
   pointIdx: number;
 }
 
+interface GestureLikeEvent extends Event {
+  scale?: number;
+  clientX?: number;
+  clientY?: number;
+}
+
 const Canvas: React.FC<CanvasProps> = ({ 
   points, setPoints, settings, setSettings, planks, wastePieces, 
-  scale, offset, setOffset, showEdgeLengths, gridSize, snapToGrid 
+  scale, setScale, offset, setOffset, showEdgeLengths, gridSize, snapToGrid 
 }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [hoverIdx, setHoverIdx] = useState<number | null>(null);
+  const scaleRef = useRef(scale);
+  const offsetRef = useRef(offset);
+  const gestureScaleRef = useRef<number | null>(null);
   const [hoverPlank, setHoverPlank] = useState<PlankInstance | null>(null);
-  const [closestEdgeIdx, setClosestEdgeIdx] = useState<number | null>(null);
-  const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [lastPanPos, setLastPanPos] = useState({ x: 0, y: 0 });
   const [impossibleEdge, setImpossibleEdge] = useState<number | null>(null);
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [snapModifierActive, setSnapModifierActive] = useState(false);
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
 
   // Kährs Palette
@@ -46,15 +53,25 @@ const Canvas: React.FC<CanvasProps> = ({
   const cutColorBase = { r: 245, g: 241, b: 239 };
 
   useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => { if (e.key === 'Shift') setSnapModifierActive(true); };
-    const handleKeyUp = (e: KeyboardEvent) => { if (e.key === 'Shift') setSnapModifierActive(false); };
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, []);
+    scaleRef.current = scale;
+    offsetRef.current = offset;
+  }, [scale, offset]);
+
+  const {
+    hoverIdx,
+    closestEdgeIdx,
+    draggingIdx,
+    handlePrimaryDown,
+    handlePointerMove,
+    handlePointerUp,
+    deletePoint
+  } = usePlanEditor({
+    points,
+    setPoints,
+    snapToGrid,
+    gridSize,
+    interactionScale: scale
+  });
 
   const edgeLengths = useMemo(() => {
     if (points.length < 2) return [];
@@ -220,21 +237,20 @@ const Canvas: React.FC<CanvasProps> = ({
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (contextMenu) { setContextMenu(null); return; }
-    if (hoverIdx !== null) { if (e.button === 0) setDraggingIdx(hoverIdx); return; }
-    
-    const canvas = canvasRef.current; if (!canvas) return;
+
+    if (e.button !== 0) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const mx = (e.clientX - rect.left - canvas.width / 2 - offset.x) / scale;
     const my = (e.clientY - rect.top - canvas.height / 2 - offset.y) / scale;
     const cursor = { x: mx, y: my };
 
-    if (e.button === 0) {
-      const nextPoints = addOrInsertPoint(points, cursor, closestEdgeIdx, snapToGrid, gridSize);
-      if (nextPoints) {
-        setPoints(nextPoints);
-      } else {
-        setIsPanning(true); setLastPanPos({ x: e.clientX, y: e.clientY });
-      }
+    const result = handlePrimaryDown(cursor);
+    if (!result.startedDrag && !result.insertedPoint) {
+      setIsPanning(true);
+      setLastPanPos({ x: e.clientX, y: e.clientY });
     }
   };
 
@@ -253,44 +269,111 @@ const Canvas: React.FC<CanvasProps> = ({
     const my = (e.clientY - rect.top - canvas.height / 2 - offset.y) / scale;
     const cursor = { x: mx, y: my };
 
-    if (draggingIdx !== null) {
-      const n = [...points];
-      n[draggingIdx] = getDraggedPoint(points, draggingIdx, cursor, snapToGrid, gridSize, snapModifierActive);
-      setPoints(n);
-      return;
-    }
-
-    // Hover-logik
-    const foundIdx = getHoverPointIndex(points, cursor, scale);
-    setHoverIdx(foundIdx);
+    const moveState = handlePointerMove(cursor);
 
     let foundPlank = null;
-    if (points.length >= 3 && foundIdx === null) {
+    if (points.length >= 3 && !moveState.isDragging && moveState.hoverIdx === null) {
       for (const p of planks) if (mx >= p.x && mx <= p.x + p.w && my >= p.y && my <= p.y + p.h) { foundPlank = p; break; }
     }
     setHoverPlank(foundPlank);
-
-    setClosestEdgeIdx(getClosestEdgeInsertIndex(points, cursor, scale, foundIdx));
   };
 
-  const deletePoint = (idx: number) => {
-    const n = deletePointAtIndex(points, idx);
-    if (n === points) return;
-    setPoints(n);
-    if (settings.originPointIdx === idx) setSettings({...settings, originPointIdx: 0});
+  const handleDeletePoint = (idx: number) => {
+    const nextPoints = deletePoint(idx);
+    if (nextPoints === points) return;
+    if (settings.originPointIdx === idx) setSettings({ ...settings, originPointIdx: 0 });
     setContextMenu(null);
   };
 
+  const zoomAtPointer = useCallback((clientX: number, clientY: number, nextScale: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const currentScale = scaleRef.current;
+    const currentOffset = offsetRef.current;
+    const clampedScale = Math.max(0.01, Math.min(0.5, nextScale));
+    if (Math.abs(clampedScale - currentScale) < 0.000001) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const pointerX = clientX - rect.left;
+    const pointerY = clientY - rect.top;
+
+    const worldX = (pointerX - canvas.width / 2 - currentOffset.x) / currentScale;
+    const worldY = (pointerY - canvas.height / 2 - currentOffset.y) / currentScale;
+
+    const nextOffset = {
+      x: pointerX - canvas.width / 2 - worldX * clampedScale,
+      y: pointerY - canvas.height / 2 - worldY * clampedScale
+    };
+
+    scaleRef.current = clampedScale;
+    offsetRef.current = nextOffset;
+
+    setScale(clampedScale);
+    setOffset(nextOffset);
+  }, [setScale, setOffset]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const zoomFactor = Math.exp(-e.deltaY * 0.0025);
+      zoomAtPointer(e.clientX, e.clientY, scaleRef.current * zoomFactor);
+    };
+
+    const handleGestureStart = (e: Event) => {
+      const gestureEvent = e as GestureLikeEvent;
+      gestureEvent.preventDefault();
+      gestureScaleRef.current = gestureEvent.scale ?? 1;
+    };
+
+    const handleGestureChange = (e: Event) => {
+      const gestureEvent = e as GestureLikeEvent;
+      gestureEvent.preventDefault();
+      const currentGestureScale = gestureEvent.scale ?? 1;
+      const previousGestureScale = gestureScaleRef.current ?? currentGestureScale;
+      if (previousGestureScale === 0) return;
+
+      const zoomFactor = currentGestureScale / previousGestureScale;
+      gestureScaleRef.current = currentGestureScale;
+
+      const rect = container.getBoundingClientRect();
+      const clientX = typeof gestureEvent.clientX === 'number' ? gestureEvent.clientX : rect.left + rect.width / 2;
+      const clientY = typeof gestureEvent.clientY === 'number' ? gestureEvent.clientY : rect.top + rect.height / 2;
+      zoomAtPointer(clientX, clientY, scaleRef.current * zoomFactor);
+    };
+
+    const handleGestureEnd = () => {
+      gestureScaleRef.current = null;
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    container.addEventListener('gesturestart', handleGestureStart as EventListener, { passive: false });
+    container.addEventListener('gesturechange', handleGestureChange as EventListener, { passive: false });
+    container.addEventListener('gestureend', handleGestureEnd as EventListener);
+
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+      container.removeEventListener('gesturestart', handleGestureStart as EventListener);
+      container.removeEventListener('gesturechange', handleGestureChange as EventListener);
+      container.removeEventListener('gestureend', handleGestureEnd as EventListener);
+    };
+  }, [zoomAtPointer]);
+
   return (
-    <div className="relative flex-1 bg-[#FBFBFB] overflow-hidden" 
+    <div ref={containerRef}
+         className="relative flex-1 bg-[#FBFBFB] overflow-hidden"
          onContextMenu={(e) => { e.preventDefault(); if (hoverIdx !== null) setContextMenu({ x: e.clientX, y: e.clientY, pointIdx: hoverIdx }); }}
          style={{ cursor: isPanning ? 'grabbing' : draggingIdx !== null ? 'grabbing' : hoverIdx !== null ? 'pointer' : closestEdgeIdx !== null ? 'copy' : 'crosshair' }}>
       
       <canvas ref={canvasRef} 
               onMouseDown={handleMouseDown} 
               onMouseMove={handleMouseMove} 
-              onMouseUp={() => { setDraggingIdx(null); setIsPanning(false); }}
-              onMouseLeave={() => { setDraggingIdx(null); setIsPanning(false); }}
+              onMouseUp={() => { handlePointerUp(); setIsPanning(false); }}
+              onMouseLeave={() => { handlePointerUp(); setIsPanning(false); }}
               className="w-full h-full block" />
 
       {showEdgeLengths && points.length >= 2 && points.map((p1, i) => {
@@ -321,7 +404,7 @@ const Canvas: React.FC<CanvasProps> = ({
       {contextMenu && (
         <div className="fixed z-50 bg-white border border-[#E5E5E5] shadow-2xl py-1 min-w-[140px]" style={{ left: contextMenu.x, top: contextMenu.y }}>
           <button onClick={() => { setSettings({...settings, originPointIdx: contextMenu.pointIdx}); setContextMenu(null); }} className="w-full px-4 py-2 text-left text-[9px] font-bold uppercase tracking-widest hover:bg-[#F9F9F9]">Välj som start</button>
-          <button onClick={() => deletePoint(contextMenu.pointIdx)} className="w-full px-4 py-2 text-left text-[9px] font-bold uppercase tracking-widest text-red-600 hover:bg-[#FFF5F5]">Ta bort hörn</button>
+          <button onClick={() => handleDeletePoint(contextMenu.pointIdx)} className="w-full px-4 py-2 text-left text-[9px] font-bold uppercase tracking-widest text-red-600 hover:bg-[#FFF5F5]">Ta bort hörn</button>
         </div>
       )}
 

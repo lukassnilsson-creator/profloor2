@@ -20,6 +20,17 @@ export interface SavedProduct {
   lengthMm: number;
   widthMm: number;
   planksPerPackage: number;
+  minStagger: number;
+  startOffset: number;
+  startOffsetVertical: number;
+  minEndPiece: number;
+}
+
+export interface ProductDesignSettings {
+  minStagger: number;
+  startOffset: number;
+  startOffsetVertical: number;
+  minEndPiece: number;
 }
 
 export interface PlankSettings {
@@ -29,9 +40,22 @@ export interface PlankSettings {
   minStagger: number; // mm
   gap: number; // mm expansion gap
   startOffset: number; // mm - shifting the start of the first row
+  startOffsetVertical: number; // mm - shifting the row alignment vertically
   planksPerPackage: number; // pieces
   visualContrast: number; // 0 to 1
   originPointIdx: number; // Index of the point to start the layout from
+}
+
+export interface FloorDesign {
+  id: string;
+  name: string;
+  points: Point[];
+  settings: PlankSettings;
+  productSettingsById: Record<string, ProductDesignSettings>;
+  activeProductId: string | null;
+  productInfo: ProductInfo | null;
+  scale: number;
+  offset: { x: number; y: number };
 }
 
 export interface Stats {

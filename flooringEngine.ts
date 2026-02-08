@@ -33,6 +33,10 @@ export const calculateLayout = (
 
   const rowHeight = settings.width;
   const fullPlankLength = settings.length;
+  const normalizedVerticalOffset =
+    rowHeight > 0
+      ? (((settings.startOffsetVertical || 0) % rowHeight) + rowHeight) % rowHeight
+      : 0;
 
   /**
    * Helper to perform layout with a specific vertical offset
@@ -231,5 +235,5 @@ export const calculateLayout = (
     return { planks, wastePieces, totalPlanksOpened };
   };
 
-  return performLayout(0);
+  return performLayout(normalizedVerticalOffset);
 };

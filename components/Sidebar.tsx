@@ -62,6 +62,8 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [productUrl, setProductUrl] = useState('');
   const [isFetching, setIsFetching] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
+  const [productError, setProductError] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
 
   const supportedImportMimeTypes = ['image/png', 'image/jpeg', 'application/pdf'];
@@ -69,10 +71,11 @@ const Sidebar: React.FC<SidebarProps> = ({
   const startImportFromFile = (file: File | undefined) => {
     if (!file) return;
     if (supportedImportMimeTypes.includes(file.type) || /\.(png|jpe?g|pdf)$/i.test(file.name)) {
+      setImportError(null);
       onStartImport(file);
       return;
     }
-    alert('Filformat stöds inte. Välj PNG, JPG eller PDF.');
+    setImportError('Filformat stöds inte. Välj PNG, JPG eller PDF.');
   };
 
   const handleChange = (key: keyof PlankSettings, val: string | number) => {
@@ -87,17 +90,42 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const fetchProductData = async () => {
-    if (!productUrl || savedProducts.length >= 3) return;
+    const rawUrl = productUrl.trim();
+    if (!rawUrl || savedProducts.length >= 3) return;
+
+    setProductError(null);
+    let normalizedUrl = rawUrl;
+    try {
+      const parsedUrl = new URL(rawUrl);
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) {
+        throw new Error('unsupported-protocol');
+      }
+      normalizedUrl = parsedUrl.href;
+    } catch {
+      setProductError('Ange en giltig URL som börjar med http:// eller https://.');
+      return;
+    }
+
+    const duplicate = savedProducts.find((product) => product.url.trim() === normalizedUrl);
+    if (duplicate) {
+      onSelectProduct(duplicate);
+      setProductUrl('');
+      setProductError('Produkten finns redan i listan och aktiverades.');
+      return;
+    }
+
     setIsFetching(true);
     try {
-      // Best Practice: Anropa din egen API route istället för SDK:n direkt
       const res = await fetch('/api/product-lookup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ productUrl })
+        body: JSON.stringify({ productUrl: normalizedUrl })
       });
 
-      if (!res.ok) throw new Error('API request failed');
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        throw new Error(payload?.error || 'Kunde inte hämta produktdata just nu.');
+      }
       const data = await res.json();
       
       const fetchedProduct: SavedProduct = {
@@ -105,10 +133,14 @@ const Sidebar: React.FC<SidebarProps> = ({
         name: data.productName,
         pricePerPackage: data.pricePerPackage,
         currency: data.currency,
-        url: productUrl,
+        url: normalizedUrl,
         lengthMm: data.lengthMm,
         widthMm: data.widthMm,
-        planksPerPackage: data.planksPerPackage
+        planksPerPackage: data.planksPerPackage,
+        minStagger: settings.minStagger,
+        startOffset: settings.startOffset,
+        startOffsetVertical: settings.startOffsetVertical,
+        minEndPiece: settings.minEndPiece
       };
 
       onAddProduct(fetchedProduct);
@@ -116,13 +148,14 @@ const Sidebar: React.FC<SidebarProps> = ({
 
     } catch (error) {
       console.error("Failed to fetch product data", error);
-      alert("Kunde inte hämta produktdata automatiskt via servern.");
+      setProductError(error instanceof Error ? error.message : 'Kunde inte hämta produktdata automatiskt via servern.');
     } finally {
       setIsFetching(false);
     }
   };
 
   const maxOffset = Math.max(0, settings.length - settings.minEndPiece);
+  const maxVerticalOffset = Math.max(0, settings.width);
   const maxMinPiece = Math.max(0, settings.length / 2);
   const isProductLimitReached = savedProducts.length >= 3;
 
@@ -143,16 +176,22 @@ const Sidebar: React.FC<SidebarProps> = ({
                type="text" 
                placeholder="Klistra in länk till golv..."
                value={productUrl}
-               onChange={(e) => setProductUrl(e.target.value)}
+               onChange={(e) => {
+                 setProductUrl(e.target.value);
+                 if (productError) setProductError(null);
+               }}
                className="w-full bg-white border border-[#E5E5E5] px-3 py-2 text-[10px] focus:outline-none focus:border-[#D2B7AC] transition"
              />
 	             <button 
 	               onClick={fetchProductData}
-	               disabled={isFetching || !productUrl || isProductLimitReached}
+		               disabled={isFetching || !productUrl.trim() || isProductLimitReached}
 	               className="w-full py-3 bg-[#D2B7AC] text-white text-[10px] font-bold uppercase tracking-[0.15em] hover:bg-[#C5A599] transition-colors disabled:opacity-50"
 	             >
-	               {isFetching ? 'Hämtar data...' : 'Hämta Produktdata'}
-	             </button>
+		               {isFetching ? 'Hämtar data...' : 'Hämta Produktdata'}
+		             </button>
+                 {productError && (
+                   <p className="text-[9px] text-red-600 leading-relaxed">{productError}</p>
+                 )}
                {isProductLimitReached && (
                  <p className="text-[9px] text-[#A0A0A0] leading-relaxed">
                    Du kan ha max 3 produkter. Ta bort en för att lägga till en ny.
@@ -237,11 +276,14 @@ const Sidebar: React.FC<SidebarProps> = ({
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
               Importera Ritning
             </button>
-          </div>
+	          </div>
+            {importError && (
+              <p className="text-[9px] text-red-600 mt-2">{importError}</p>
+            )}
 
-          <div className="space-y-8">
-            <div>
-              <label className="block text-[9px] font-bold text-[#A0A0A0] uppercase tracking-[0.2em] mb-4">Plankmått (mm)</label>
+	          <div className="space-y-8">
+	            <div>
+	              <label className="block text-[9px] font-bold text-[#A0A0A0] uppercase tracking-[0.2em] mb-4">Plankmått (mm)</label>
               <div className="flex gap-4">
                 <div className="flex-1">
                   <span className="text-[9px] text-[#A0A0A0] block mb-1 uppercase font-bold">Längd</span>
@@ -261,32 +303,20 @@ const Sidebar: React.FC<SidebarProps> = ({
                     value={settings.width === 0 ? '' : settings.width}
                     onChange={(e) => handleChange('width', e.target.value)}
                     className="w-full bg-[#FBFBFB] border-b border-[#E5E5E5] py-2 text-sm focus:outline-none focus:border-[#D2B7AC] transition text-[#1A1A1A]"
+	                  />
+	                </div>
+	              </div>
+                <div className="mt-4">
+                  <label className="block text-[9px] font-bold text-[#A0A0A0] uppercase tracking-[0.2em] mb-2">Antal per förpackning</label>
+                  <input 
+                    type="number" 
+                    min="1"
+                    value={settings.planksPerPackage === 0 ? '' : settings.planksPerPackage}
+                    onChange={(e) => handleChange('planksPerPackage', e.target.value)}
+                    className="w-full bg-[#FBFBFB] border-b border-[#E5E5E5] py-2 text-sm focus:outline-none focus:border-[#D2B7AC] transition text-[#1A1A1A]"
                   />
                 </div>
-              </div>
-            </div>
-
-            <KahrsInput 
-              title="Startförskjutning"
-              leftLabel="Ingen"
-              rightLabel={`${settings.startOffset} mm`}
-              value={settings.startOffset}
-              min={0}
-              max={maxOffset}
-              step={10}
-              onChange={(val) => handleChange('startOffset', val)}
-            />
-
-            <KahrsInput 
-              title="Minsta ändbit"
-              leftLabel="Standard"
-              rightLabel={`${settings.minEndPiece} mm`}
-              value={settings.minEndPiece}
-              min={0}
-              max={maxMinPiece}
-              step={10}
-              onChange={(val) => handleChange('minEndPiece', val)}
-            />
+	            </div>
 
             <KahrsInput 
               title="Skarvförskjutning"
@@ -299,18 +329,40 @@ const Sidebar: React.FC<SidebarProps> = ({
               onChange={(val) => handleChange('minStagger', val)}
             />
 
-            <div>
-              <label className="block text-[9px] font-bold text-[#A0A0A0] uppercase tracking-[0.2em] mb-2">Antal per förpackning</label>
-              <input 
-                type="number" 
-                min="1"
-                value={settings.planksPerPackage === 0 ? '' : settings.planksPerPackage}
-                onChange={(e) => handleChange('planksPerPackage', e.target.value)}
-                className="w-full bg-[#FBFBFB] border-b border-[#E5E5E5] py-2 text-sm focus:outline-none focus:border-[#D2B7AC] transition text-[#1A1A1A]"
-              />
-            </div>
-          </div>
-        </section>
+            <KahrsInput 
+              title="Startförskjutning horizontellt"
+              leftLabel="Ingen"
+              rightLabel={`${settings.startOffset} mm`}
+              value={settings.startOffset}
+              min={0}
+              max={maxOffset}
+              step={10}
+              onChange={(val) => handleChange('startOffset', val)}
+            />
+
+            <KahrsInput 
+              title="Startförskjutning vertikalt"
+              leftLabel="Ingen"
+              rightLabel={`${settings.startOffsetVertical} mm`}
+              value={settings.startOffsetVertical}
+              min={0}
+              max={maxVerticalOffset}
+              step={10}
+              onChange={(val) => handleChange('startOffsetVertical', val)}
+            />
+
+            <KahrsInput 
+              title="Minsta ändbit"
+              leftLabel="Standard"
+              rightLabel={`${settings.minEndPiece} mm`}
+              value={settings.minEndPiece}
+              min={0}
+              max={maxMinPiece}
+              step={10}
+              onChange={(val) => handleChange('minEndPiece', val)}
+            />
+	          </div>
+	        </section>
 
         <section className="pt-8 border-t border-[#F1F1F1]">
           <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#A0A0A0] mb-6">Specifikation</h2>
