@@ -134,6 +134,9 @@ const Sidebar: React.FC<SidebarProps> = ({
         pricePerPackage: data.pricePerPackage,
         currency: data.currency,
         url: normalizedUrl,
+        stockStatus: typeof data.stockStatus === 'string' && data.stockStatus.trim() ? data.stockStatus : undefined,
+        deliveryEstimate: typeof data.deliveryEstimate === 'string' && data.deliveryEstimate.trim() ? data.deliveryEstimate : undefined,
+        isCampaignPrice: typeof data.isCampaignPrice === 'boolean' ? data.isCampaignPrice : undefined,
         lengthMm: data.lengthMm,
         widthMm: data.widthMm,
         planksPerPackage: data.planksPerPackage,
@@ -158,6 +161,14 @@ const Sidebar: React.FC<SidebarProps> = ({
   const maxVerticalOffset = Math.max(0, settings.width);
   const maxMinPiece = Math.max(0, settings.length / 2);
   const isProductLimitReached = savedProducts.length >= 3;
+  const isWasteLow = stats.wastePercent <= 15;
+  const getStoreName = (productUrlValue: string) => {
+    try {
+      return new URL(productUrlValue).hostname.replace(/^www\./i, '') || 'Okänt';
+    } catch {
+      return 'Okänt';
+    }
+  };
 
   return (
     <div className="w-80 h-full bg-white flex flex-col overflow-y-auto border-r border-[#E5E5E5] px-8 py-10">
@@ -170,80 +181,102 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       <div className="flex flex-col gap-10">
         <section className="space-y-6">
-          <div className="bg-[#FDF9F8] p-4 border border-[#EAD8D1] space-y-3">
-             <label className="block text-[9px] font-bold text-[#A0A0A0] uppercase tracking-[0.2em]">Produktinfo via URL</label>
-             <input 
-               type="text" 
-               placeholder="Klistra in länk till golv..."
-               value={productUrl}
-               onChange={(e) => {
-                 setProductUrl(e.target.value);
-                 if (productError) setProductError(null);
-               }}
-               className="w-full bg-white border border-[#E5E5E5] px-3 py-2 text-[10px] focus:outline-none focus:border-[#D2B7AC] transition"
-             />
-	             <button 
-	               onClick={fetchProductData}
-		               disabled={isFetching || !productUrl.trim() || isProductLimitReached}
-	               className="w-full py-3 bg-[#D2B7AC] text-white text-[10px] font-bold uppercase tracking-[0.15em] hover:bg-[#C5A599] transition-colors disabled:opacity-50"
-	             >
-		               {isFetching ? 'Hämtar data...' : 'Hämta Produktdata'}
-		             </button>
-                 {productError && (
-                   <p className="text-[9px] text-red-600 leading-relaxed">{productError}</p>
-                 )}
-               {isProductLimitReached && (
-                 <p className="text-[9px] text-[#A0A0A0] leading-relaxed">
-                   Du kan ha max 3 produkter. Ta bort en för att lägga till en ny.
-                 </p>
-               )}
-               {savedProducts.length > 0 && (
-                 <div className="space-y-2 pt-1">
-                   {savedProducts.map((product) => {
-                     const totalPrice = productTotalsById[product.id] ?? 0;
-                     const isActive = activeProductId === product.id;
-                     return (
-                       <div
-                         key={product.id}
-                         role="button"
-                         tabIndex={0}
-                         onClick={() => onSelectProduct(product)}
-                         onKeyDown={(e) => {
-                           if (e.key === 'Enter' || e.key === ' ') {
-                             e.preventDefault();
-                             onSelectProduct(product);
-                           }
-                         }}
-                         className={`w-full text-left border px-2.5 py-2 transition-colors cursor-pointer ${isActive ? 'border-[#D2B7AC] bg-white' : 'border-[#E5E5E5] bg-[#FBFBFB] hover:bg-white'}`}
-                       >
-                         <div className="flex items-start justify-between gap-2">
-                           <div className="min-w-0">
-                             <p className="text-[9px] font-bold text-[#1A1A1A] truncate">{product.name}</p>
-                             <p className="text-[9px] text-[#A0A0A0]">{product.pricePerPackage} {product.currency} / pkt</p>
-                           </div>
-                           <div className="flex items-center gap-2 shrink-0">
-                             <p className="text-[9px] font-bold text-[#1A1A1A] text-right">
-                               {Math.round(totalPrice).toLocaleString()} {product.currency}
-                             </p>
-                             <button
-                               type="button"
-                               onClick={(e) => {
-                                 e.stopPropagation();
-                                 onRemoveProduct(product.id);
-                               }}
-                               className="w-4 h-4 text-[10px] leading-none text-[#A0A0A0] hover:text-[#1A1A1A]"
-                               aria-label={`Ta bort ${product.name}`}
-                             >
-                               ×
-                             </button>
-                           </div>
-                         </div>
-                       </div>
-                     );
-                   })}
-                 </div>
-               )}
-	          </div>
+          <div className="bg-[#FDF9F8] border border-[#EAD8D1]">
+            <div className="p-4 space-y-3">
+              <label className="block text-[9px] font-bold text-[#A0A0A0] uppercase tracking-[0.2em]">Produktinfo via URL</label>
+              <input
+                type="text"
+                placeholder="Klistra in länk till golv..."
+                value={productUrl}
+                onChange={(e) => {
+                  setProductUrl(e.target.value);
+                  if (productError) setProductError(null);
+                }}
+                className="w-full bg-white border border-[#E5E5E5] px-3 py-2 text-[10px] focus:outline-none focus:border-[#D2B7AC] transition"
+              />
+              <button
+                onClick={fetchProductData}
+                disabled={isFetching || !productUrl.trim() || isProductLimitReached}
+                className="w-full py-3 bg-[#D2B7AC] text-white text-[10px] font-bold uppercase tracking-[0.15em] hover:bg-[#C5A599] transition-colors disabled:opacity-50"
+              >
+                {isFetching ? 'Hämtar data...' : 'Hämta Produktdata'}
+              </button>
+              {productError && (
+                <p className="text-[9px] text-red-600 leading-relaxed">{productError}</p>
+              )}
+              {isProductLimitReached && (
+                <p className="text-[9px] text-[#A0A0A0] leading-relaxed">Max 3 produkter samtidigt.</p>
+              )}
+            </div>
+            {savedProducts.length > 0 && (
+              <div className="pt-1">
+                <div className="border-t border-[#EAD8D1]"></div>
+                {savedProducts.map((product, index) => {
+                  const totalPrice = productTotalsById[product.id] ?? 0;
+                  const isActive = activeProductId === product.id;
+                  const storeName = getStoreName(product.url);
+                  const deliveryEstimate = product.deliveryEstimate?.trim() || 'Okänt';
+                  return (
+                    <div
+                      key={product.id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => onSelectProduct(product)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onSelectProduct(product);
+                        }
+                      }}
+                      className={`w-full px-4 py-2.5 text-left transition-colors cursor-pointer hover:bg-white/40 ${
+                        isActive ? 'bg-white' : ''
+                      } ${
+                        index > 0 ? 'border-t border-[#EAD8D1]' : ''
+                      }`}
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2 mb-0.5">
+                          <p className="text-[8px] font-bold uppercase tracking-[0.1em] text-[#A0A0A0] truncate">{storeName}</p>
+                          {product.isCampaignPrice && (
+                            <span className="shrink-0 text-[8px] font-bold uppercase tracking-[0.1em] text-white bg-[#1A1A1A] px-1.5 py-0.5">
+                              Kampanj
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between gap-2">
+                              <p className={`text-[9px] font-bold truncate ${isActive ? 'text-[#1A1A1A]' : 'text-[#333]'}`}>{product.name}</p>
+                              <p className="text-[9px] font-bold text-[#1A1A1A] text-right shrink-0">
+                                {Math.round(totalPrice).toLocaleString()} {product.currency}
+                              </p>
+                            </div>
+                            <p className="text-[9px] text-[#A0A0A0]">
+                              {product.pricePerPackage} {product.currency} / pkt
+                            </p>
+                            <div className="mt-1 text-[8px] uppercase tracking-[0.1em] text-[#A0A0A0]">
+                              <span className="truncate block">Leverans: {deliveryEstimate}</span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRemoveProduct(product.id);
+                            }}
+                            className="w-4 h-4 text-[10px] leading-none text-[#A0A0A0] hover:text-[#1A1A1A] shrink-0 mt-0.5"
+                            aria-label={`Ta bort ${product.name}`}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           <div
             onDragEnter={(e) => { e.preventDefault(); setIsDragActive(true); }}
@@ -381,13 +414,33 @@ const Sidebar: React.FC<SidebarProps> = ({
             </div>
             <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
               <span className="text-[11px] text-[#888] font-medium uppercase tracking-wider">Spillprocent</span>
-              <span className="text-lg font-bold text-[#D2B7AC]">{stats.wastePercent.toFixed(1)}%</span>
+              <span className={`text-lg font-bold flex items-center gap-1 ${isWasteLow ? 'text-[#2E9B4A]' : 'text-[#D2B7AC]'}`}>
+                {isWasteLow && (
+                  <svg className="w-4 h-4 text-[#2E9B4A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                    <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M12 20v-6" />
+                    <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M12 14c0-3 2.3-5.5 5.2-5.9-.5 2.9-2.1 5.5-5.2 5.9Z" />
+                    <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M12 14c0-2.8-2.2-5.1-5-5.4.4 2.7 1.9 5.1 5 5.4Z" />
+                    <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M9.5 20h5" />
+                  </svg>
+                )}
+                {stats.wastePercent.toFixed(1)}%
+              </span>
             </div>
             {productInfo && stats.totalPrice && (
-              <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2 pt-4">
-                <span className="text-[11px] text-[#1A1A1A] font-bold uppercase tracking-wider">Total Kostnad</span>
-                <span className="text-xl font-black text-[#1A1A1A]">{Math.round(stats.totalPrice).toLocaleString()} {productInfo.currency}</span>
-              </div>
+              <>
+                <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2 pt-4">
+                  <span className="text-[11px] text-[#1A1A1A] font-bold uppercase tracking-wider">Total Kostnad</span>
+                  <span className="text-xl font-black text-[#1A1A1A]">{Math.round(stats.totalPrice).toLocaleString()} {productInfo.currency}</span>
+                </div>
+                {stats.area > 0 && (
+                  <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
+                    <span className="text-[11px] text-[#888] font-medium uppercase tracking-wider">Pris per m²</span>
+                    <span className="text-base font-bold text-[#1A1A1A]">
+                      {Math.round(stats.totalPrice / stats.area).toLocaleString()} {productInfo.currency}/m²
+                    </span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </section>

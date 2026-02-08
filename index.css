@@ -6,6 +6,14 @@
   body {
     @apply font-sans bg-[#FBFBFB] text-[#1A1A1A] overflow-hidden;
   }
+
+  :where(button, input, select, textarea) {
+    border-radius: 4px;
+  }
+
+  :where([class*="border"]):not([class*="border-t"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-r"]) {
+    border-radius: 4px;
+  }
 }
 
 @layer components {

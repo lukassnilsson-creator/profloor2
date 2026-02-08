@@ -318,10 +318,27 @@ const Canvas: React.FC<CanvasProps> = ({
     if (!container) return;
 
     const handleWheel = (e: WheelEvent) => {
-      if (!e.ctrlKey && !e.metaKey) return;
+      if (gestureScaleRef.current !== null && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        return;
+      }
+
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const zoomFactor = Math.exp(-e.deltaY * 0.0025);
+        zoomAtPointer(e.clientX, e.clientY, scaleRef.current * zoomFactor);
+        return;
+      }
+
+      if (Math.abs(e.deltaX) < 0.0001 && Math.abs(e.deltaY) < 0.0001) return;
       e.preventDefault();
-      const zoomFactor = Math.exp(-e.deltaY * 0.0025);
-      zoomAtPointer(e.clientX, e.clientY, scaleRef.current * zoomFactor);
+      const currentOffset = offsetRef.current;
+      const nextOffset = {
+        x: currentOffset.x - e.deltaX,
+        y: currentOffset.y - e.deltaY
+      };
+      offsetRef.current = nextOffset;
+      setOffset(nextOffset);
     };
 
     const handleGestureStart = (e: Event) => {
@@ -361,7 +378,7 @@ const Canvas: React.FC<CanvasProps> = ({
       container.removeEventListener('gesturechange', handleGestureChange as EventListener);
       container.removeEventListener('gestureend', handleGestureEnd as EventListener);
     };
-  }, [zoomAtPointer]);
+  }, [zoomAtPointer, setOffset]);
 
   return (
     <div ref={containerRef}

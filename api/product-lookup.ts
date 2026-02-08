@@ -58,6 +58,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       model: 'gemini-3-flash-preview',
       contents: `Search for this flooring product and extract its technical specifications: ${productUrl}. 
       I need the plank length in mm, plank width in mm, the number of planks per package (pieces), and the current price per package (excluding any bulk discounts).
+      If available, also extract stock status, estimated delivery time, and whether the shown package price is a campaign/discount price.
       Return the data in Swedish context if possible.`,
       config: {
         tools: [{ googleSearch: {} }],
@@ -70,7 +71,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
             widthMm: { type: Type.NUMBER },
             planksPerPackage: { type: Type.NUMBER },
             pricePerPackage: { type: Type.NUMBER },
-            currency: { type: Type.STRING }
+            currency: { type: Type.STRING },
+            stockStatus: { type: Type.STRING },
+            deliveryEstimate: { type: Type.STRING },
+            isCampaignPrice: { type: Type.BOOLEAN }
           },
           required: ["productName", "lengthMm", "widthMm", "planksPerPackage", "pricePerPackage", "currency"]
         }

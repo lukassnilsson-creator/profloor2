@@ -30,6 +30,10 @@ const INITIAL_SETTINGS: PlankSettings = {
 
 const DEFAULT_SCALE = 0.08;
 const DEFAULT_OFFSET = { x: 0, y: 0 };
+const MIN_SCALE = 0.01;
+const MAX_SCALE = 0.5;
+const MIN_ZOOM_PERCENT = 10;
+const MAX_ZOOM_PERCENT = 500;
 const MAX_DESIGNS = 3;
 const MAX_DESIGN_NAME_LENGTH = 25;
 const DESIGN_LIMIT_MESSAGE = 'max 3 golvdesigner samtidigt.';
@@ -132,7 +136,10 @@ const parseProductInfo = (value: unknown): ProductInfo | null => {
     name: value.name,
     pricePerPackage: value.pricePerPackage,
     currency: value.currency,
-    url: value.url
+    url: value.url,
+    stockStatus: typeof value.stockStatus === 'string' && value.stockStatus.trim() ? value.stockStatus : undefined,
+    deliveryEstimate: typeof value.deliveryEstimate === 'string' && value.deliveryEstimate.trim() ? value.deliveryEstimate : undefined,
+    isCampaignPrice: typeof value.isCampaignPrice === 'boolean' ? value.isCampaignPrice : undefined
   };
 };
 
@@ -190,6 +197,9 @@ const parseSavedProduct = (item: unknown): SavedProduct | null => {
     pricePerPackage: item.pricePerPackage,
     currency: item.currency,
     url: item.url,
+    stockStatus: typeof item.stockStatus === 'string' && item.stockStatus.trim() ? item.stockStatus : undefined,
+    deliveryEstimate: typeof item.deliveryEstimate === 'string' && item.deliveryEstimate.trim() ? item.deliveryEstimate : undefined,
+    isCampaignPrice: typeof item.isCampaignPrice === 'boolean' ? item.isCampaignPrice : undefined,
     lengthMm: item.lengthMm,
     widthMm: item.widthMm,
     planksPerPackage: item.planksPerPackage,
@@ -213,7 +223,7 @@ const parseFloorDesign = (item: unknown, index: number): FloorDesign | null => {
     y: asNumber(rawOffset.y, DEFAULT_OFFSET.y)
   };
 
-  const scale = Math.max(0.01, Math.min(0.5, asNumber(item.scale, DEFAULT_SCALE)));
+  const scale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, asNumber(item.scale, DEFAULT_SCALE)));
   const name = typeof item.name === 'string' && item.name.trim() ? item.name : `Golv ${index + 1}`;
   const id = typeof item.id === 'string' && item.id ? item.id : createDesignId();
 
@@ -296,6 +306,7 @@ const App: React.FC = () => {
   const [savedProducts, setSavedProducts] = useState<SavedProduct[]>(loadSavedProducts);
   const [editingDesignId, setEditingDesignId] = useState<string | null>(null);
   const [editingDesignName, setEditingDesignName] = useState('');
+  const [zoomPercentInput, setZoomPercentInput] = useState(() => String(Math.round(DEFAULT_SCALE * 1000)));
 
   const activeDesign = useMemo(() => {
     return designState.designs.find((design) => design.id === designState.activeDesignId) ?? designState.designs[0];
@@ -335,6 +346,10 @@ const App: React.FC = () => {
     }
   }, [designState.designs, editingDesignId]);
 
+  useEffect(() => {
+    setZoomPercentInput(String(Math.round(scale * 1000)));
+  }, [scale, designState.activeDesignId]);
+
   const updateDesignById = (designId: string, updater: (design: FloorDesign) => FloorDesign) => {
     setDesignState((prev) => ({
       ...prev,
@@ -358,7 +373,8 @@ const App: React.FC = () => {
   };
 
   const setActiveScale = (nextScale: number) => {
-    updateActiveDesign((design) => ({ ...design, scale: nextScale }));
+    const clampedScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, nextScale));
+    updateActiveDesign((design) => ({ ...design, scale: clampedScale }));
   };
 
   const setActiveOffset = (nextOffset: { x: number; y: number }) => {
@@ -379,11 +395,12 @@ const App: React.FC = () => {
     const areaM2 = areaMm2 / 1000000;
 
     const singlePlankAreaM2 = (settings.length * settings.width) / 1000000;
-    const materialConsumedM2 = totalPlanksOpened * singlePlankAreaM2;
-
-    const wasteArea = Math.max(0, materialConsumedM2 - areaM2);
-    const wastePercent = materialConsumedM2 > 0 ? (wasteArea / materialConsumedM2) * 100 : 0;
     const packageCount = Math.ceil(totalPlanksOpened / settings.planksPerPackage);
+    const purchasedPlanks = packageCount * settings.planksPerPackage;
+    const purchasedMaterialM2 = purchasedPlanks * singlePlankAreaM2;
+
+    const wasteArea = Math.max(0, purchasedMaterialM2 - areaM2);
+    const wastePercent = purchasedMaterialM2 > 0 ? (wasteArea / purchasedMaterialM2) * 100 : 0;
 
     let totalPrice = undefined;
     if (productInfo) {
@@ -448,7 +465,10 @@ const App: React.FC = () => {
           name: product.name,
           pricePerPackage: product.pricePerPackage,
           currency: product.currency,
-          url: product.url
+          url: product.url,
+          stockStatus: product.stockStatus,
+          deliveryEstimate: product.deliveryEstimate,
+          isCampaignPrice: product.isCampaignPrice
         },
         productSettingsById,
         settings: {
@@ -664,6 +684,18 @@ const App: React.FC = () => {
 
   const isDesignLimitReached = designState.designs.length >= MAX_DESIGNS;
 
+  const commitZoomPercent = () => {
+    const parsedPercent = Number.parseFloat(zoomPercentInput.replace(',', '.'));
+    if (!Number.isFinite(parsedPercent)) {
+      setZoomPercentInput(String(Math.round(scale * 1000)));
+      return;
+    }
+
+    const clampedPercent = Math.max(MIN_ZOOM_PERCENT, Math.min(MAX_ZOOM_PERCENT, parsedPercent));
+    setActiveScale(clampedPercent / 1000);
+    setZoomPercentInput(String(Math.round(clampedPercent)));
+  };
+
   return (
     <div className="w-full h-screen bg-[#F0F0F0] flex items-center justify-center">
       <div className="flex h-screen w-full max-w-[1200px] bg-white text-[#1A1A1A] overflow-hidden shadow-[0_30px_100px_rgba(0,0,0,0.1)] relative">
@@ -698,7 +730,7 @@ const App: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-4">
-              <div className="flex items-center gap-3 bg-[#FBFBFB] border border-[#F1F1F1] px-3 py-1.5">
+              <div className="flex items-center gap-3">
                 <div className="flex items-center gap-2">
                   <span className="text-[8px] font-bold text-[#A0A0A0] uppercase tracking-widest">Grid</span>
                   <input
@@ -742,8 +774,27 @@ const App: React.FC = () => {
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/></svg>
                 </button>
-                <div className="text-[9px] font-bold text-[#1A1A1A] tracking-widest bg-[#F9F9F9] px-2 py-1 border border-[#E5E5E5] min-w-[45px] text-center">
-                  {Math.round(scale * 1000)}%
+                <div className="flex items-center gap-1 bg-[#F9F9F9] px-2 py-1 border border-[#E5E5E5] min-w-[62px]">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={zoomPercentInput}
+                    onChange={(e) => setZoomPercentInput(e.target.value.replace(/[^0-9.,]/g, ''))}
+                    onBlur={commitZoomPercent}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        commitZoomPercent();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setZoomPercentInput(String(Math.round(scale * 1000)));
+                      }
+                    }}
+                    className="w-9 bg-transparent text-[9px] font-bold text-[#1A1A1A] tracking-widest text-right focus:outline-none"
+                    aria-label="Zoomprocent"
+                  />
+                  <span className="text-[9px] font-bold text-[#1A1A1A] tracking-widest">%</span>
                 </div>
               </div>
             </div>
@@ -765,7 +816,7 @@ const App: React.FC = () => {
                       type="button"
                       onClick={() => setDesignState((prev) => ({ ...prev, activeDesignId: design.id }))}
                       style={{ width: tabWidth }}
-                      className={`relative flex h-10 min-w-[172px] max-w-[340px] items-center rounded-t-[2px] border px-5 pr-10 text-[10px] font-bold uppercase tracking-[0.14em] whitespace-nowrap transition-colors ${
+                      className={`relative flex h-10 min-w-[172px] max-w-[340px] items-center rounded-t-[4px] rounded-b-none border px-5 pr-10 text-[10px] font-bold uppercase tracking-[0.14em] whitespace-nowrap transition-colors ${
                         isActive
                           ? 'z-10 -mb-px border-[#E2D7D2] border-b-white bg-white text-[#1A1A1A]'
                           : 'border-transparent bg-[#E4DDDA] text-[#757575] hover:bg-[#ECE5E2] hover:text-[#1A1A1A]'
@@ -811,7 +862,7 @@ const App: React.FC = () => {
                         e.stopPropagation();
                         handleRemoveDesign(design.id);
                       }}
-                      className={`absolute right-2 top-2.5 flex h-5 w-5 items-center justify-center rounded-[2px] text-[14px] leading-none transition-all ${
+                      className={`absolute right-2 top-2.5 flex h-5 w-5 items-center justify-center rounded-[4px] text-[14px] leading-none transition-all ${
                         isActive
                           ? 'text-[#8B8B8B] hover:bg-[#F2F2F2] hover:text-[#1A1A1A]'
                           : 'text-[#959595] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-[#DDD5D1] hover:text-[#1A1A1A]'
@@ -831,7 +882,7 @@ const App: React.FC = () => {
                 type="button"
                 onClick={handleAddDesign}
                 disabled={isDesignLimitReached}
-                className="mb-1 flex h-8 w-8 items-center justify-center rounded-[2px] text-[24px] leading-none text-[#7A7A7A] transition-colors hover:bg-[#F5F5F5] hover:text-[#1A1A1A] disabled:cursor-not-allowed disabled:opacity-40"
+                className="mb-1 flex h-8 w-8 items-center justify-center rounded-[4px] text-[24px] leading-none text-[#7A7A7A] transition-colors hover:bg-[#F5F5F5] hover:text-[#1A1A1A] disabled:cursor-not-allowed disabled:opacity-40"
                 title={isDesignLimitReached ? DESIGN_LIMIT_MESSAGE : 'Lägg till nytt golv'}
                 aria-label="Lägg till nytt golv"
               >

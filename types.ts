@@ -9,6 +9,9 @@ export interface ProductInfo {
   pricePerPackage: number;
   currency: string;
   url: string;
+  stockStatus?: string;
+  deliveryEstimate?: string;
+  isCampaignPrice?: boolean;
 }
 
 export interface SavedProduct {
@@ -17,6 +20,9 @@ export interface SavedProduct {
   pricePerPackage: number;
   currency: string;
   url: string;
+  stockStatus?: string;
+  deliveryEstimate?: string;
+  isCampaignPrice?: boolean;
   lengthMm: number;
   widthMm: number;
   planksPerPackage: number;
