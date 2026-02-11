@@ -62,6 +62,9 @@ export interface FloorDesign {
   productInfo: ProductInfo | null;
   scale: number;
   offset: { x: number; y: number };
+  backgroundDrawing: ImportedDrawingBackground | null;
+  showBackgroundDrawing: boolean;
+  backgroundOpacity: number; // 0 to 1
 }
 
 export interface Stats {
@@ -79,6 +82,7 @@ export interface WastePiece {
   w: number;
   h: number;
   type: 'start-cut' | 'discarded-offcut';
+  sourcePlankId?: string;
 }
 
 export interface PlankInstance {
@@ -100,4 +104,12 @@ export interface ReferenceWall {
   p1: Point;
   p2: Point;
   lengthMm: number;
+}
+
+export interface ImportedDrawingBackground {
+  src: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }

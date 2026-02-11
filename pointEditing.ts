@@ -19,7 +19,7 @@ export const getClosestEdgeInsertIndex = (
   scale: number,
   hoverPointIdx: number | null
 ): number | null => {
-  if (points.length < 4 || hoverPointIdx !== null) return null;
+  if (points.length < 3 || hoverPointIdx !== null) return null;
   const edge = findClosestEdge(cursor, points);
   return edge.distance < (25 / getSafeScale(scale)) ? edge.index : null;
 };
@@ -39,7 +39,7 @@ export const addOrInsertPoint = (
   snapToGrid: boolean,
   gridSize: number
 ): Point[] | null => {
-  if (points.length < 4) {
+  if (points.length < 3) {
     const snapped = snapPointToGrid(cursor, snapToGrid, gridSize);
     return [...points, snapped];
   }

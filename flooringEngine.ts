@@ -74,6 +74,7 @@ export const calculateLayout = (
 
     let carryOverOffcut = (settings.startOffset) % settings.length; 
     let carryOverSourceId: string | undefined = undefined; 
+    let carryOverOffcutPlacement: { x: number; y: number; h: number } | null = null;
     let lastRowJoints: number[] = []; 
     let rowBeforeLastJoints: number[] = []; 
     let totalPlanksOpened = (settings.startOffset > 0) ? 1 : 0;
@@ -95,6 +96,18 @@ export const calculateLayout = (
         const segEnd = segment.end - GAP;
         const segmentWidth = segEnd - segStart;
         if (segmentWidth <= 0.1) return;
+
+        const pushStartSideWaste = (width: number, type: WastePiece['type'], sourcePlankId?: string) => {
+          if (width <= 0.5) return;
+          wastePieces.push({
+            x: segStart - width,
+            y: actualRowTop,
+            w: width,
+            h: actualRowHeight,
+            type,
+            sourcePlankId
+          });
+        };
 
         const validateConfig = (sLen: number) => {
           if (sLen < settings.minEndPiece && Math.abs(sLen - fullPlankLength) > 0.1) return false;
@@ -125,6 +138,7 @@ export const calculateLayout = (
         let startFromOffcut = false;
         let currentSourceId: string | undefined = undefined;
         let foundStart = false;
+        let pendingStartCutWaste = 0;
 
         // Origin Alignment: How many full planks from baseX to segment start?
         const distFromOrigin = segStart - baseX;
@@ -136,14 +150,13 @@ export const calculateLayout = (
           for (let testS = carryOverOffcut; testS >= settings.minEndPiece; testS -= 5) {
             if (validateConfig(testS)) {
               const extraCut = carryOverOffcut - testS;
-              if (extraCut > 0.5) {
-                wastePieces.push({
-                  x: segStart - extraCut, y: actualRowTop, w: extraCut, h: actualRowHeight, type: 'start-cut'
-                });
-              }
+              pushStartSideWaste(extraCut, 'start-cut', carryOverSourceId);
               startLength = testS;
               startFromOffcut = true;
               currentSourceId = carryOverSourceId;
+              carryOverOffcut = 0;
+              carryOverSourceId = undefined;
+              carryOverOffcutPlacement = null;
               foundStart = true;
               break;
             }
@@ -153,10 +166,19 @@ export const calculateLayout = (
         // 2. Try Origin alignment
         if (!foundStart) {
           if (carryOverOffcut > 0.5) {
+            const discardPlacement = carryOverOffcutPlacement;
             wastePieces.push({
-              x: segStart - carryOverOffcut, y: actualRowTop, w: carryOverOffcut, h: actualRowHeight, type: 'discarded-offcut'
+              x: discardPlacement ? discardPlacement.x : segStart - carryOverOffcut,
+              y: discardPlacement ? discardPlacement.y : actualRowTop,
+              w: carryOverOffcut,
+              h: discardPlacement ? discardPlacement.h : actualRowHeight,
+              type: 'discarded-offcut',
+              sourcePlankId: carryOverSourceId
             });
           }
+          carryOverOffcut = 0;
+          carryOverSourceId = undefined;
+          carryOverOffcutPlacement = null;
           totalPlanksOpened++;
           
           if (originAlignmentOffset >= settings.minEndPiece && validateConfig(originAlignmentOffset)) {
@@ -170,9 +192,7 @@ export const calculateLayout = (
               if (validateConfig(testS)) {
                 const extraCut = fullPlankLength - testS;
                 if (extraCut > 0.5) {
-                  wastePieces.push({
-                    x: segStart - extraCut, y: actualRowTop, w: extraCut, h: actualRowHeight, type: 'start-cut'
-                  });
+                  pendingStartCutWaste = extraCut;
                 }
                 startLength = testS;
                 foundStart = true;
@@ -216,9 +236,18 @@ export const calculateLayout = (
             sourcePlankId: isFirstInSegment ? currentSourceId : undefined
           });
 
+          if (isFirstInSegment && pendingStartCutWaste > 0.5) {
+            pushStartSideWaste(pendingStartCutWaste, 'start-cut', plankId);
+            pendingStartCutWaste = 0;
+          }
+
           if (isLastInSegment) {
             carryOverOffcut = fullPlankLength - pLen;
             carryOverSourceId = plankId;
+            carryOverOffcutPlacement =
+              carryOverOffcut > 0.5
+                ? { x: curX + pLen + 20, y: actualRowTop, h: actualRowHeight }
+                : null;
           } else {
             currentRowJoints.push(curX + pLen);
           }

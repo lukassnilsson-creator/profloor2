@@ -1,13 +1,11 @@
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { PlankSettings, Stats, ProductInfo, SavedProduct } from '../types';
 
 interface SidebarProps {
   settings: PlankSettings;
   setSettings: (s: PlankSettings) => void;
   stats: Stats;
-  onReset: () => void;
-  onStartImport: (file: File) => void;
   savedProducts: SavedProduct[];
   activeProductId: string | null;
   productTotalsById: Record<string, number>;
@@ -17,40 +15,10 @@ interface SidebarProps {
   productInfo: ProductInfo | null;
 }
 
-const KahrsInput: React.FC<{
-  title: string;
-  leftLabel: string;
-  rightLabel: string;
-  value: number;
-  min: number;
-  max: number;
-  step?: number;
-  onChange: (val: number) => void;
-}> = ({ title, leftLabel, rightLabel, value, min, max, step = 1, onChange }) => (
-  <div className="space-y-1">
-    <label className="block text-[9px] font-bold text-[#A0A0A0] uppercase tracking-[0.2em]">{title}</label>
-    <input 
-      type="range" 
-      min={min} 
-      max={max} 
-      step={step}
-      value={value}
-      onChange={(e) => onChange(parseFloat(e.target.value))}
-      className="kahrs-slider"
-    />
-    <div className="flex justify-between text-[10px] text-[#444] font-medium">
-      <span className="opacity-60">{leftLabel}</span>
-      <span>{rightLabel}</span>
-    </div>
-  </div>
-);
-
 const Sidebar: React.FC<SidebarProps> = ({
   settings,
   setSettings,
   stats,
-  onReset,
-  onStartImport,
   savedProducts,
   activeProductId,
   productTotalsById,
@@ -61,21 +29,27 @@ const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const [productUrl, setProductUrl] = useState('');
   const [isFetching, setIsFetching] = useState(false);
-  const [isDragActive, setIsDragActive] = useState(false);
   const [productError, setProductError] = useState<string | null>(null);
-  const [importError, setImportError] = useState<string | null>(null);
-  const importInputRef = useRef<HTMLInputElement>(null);
+  const scrollRevealTimeoutRef = useRef<number | null>(null);
+  const [isSidebarScrolling, setIsSidebarScrolling] = useState(false);
 
-  const supportedImportMimeTypes = ['image/png', 'image/jpeg', 'application/pdf'];
+  useEffect(() => {
+    return () => {
+      if (scrollRevealTimeoutRef.current !== null) {
+        window.clearTimeout(scrollRevealTimeoutRef.current);
+      }
+    };
+  }, []);
 
-  const startImportFromFile = (file: File | undefined) => {
-    if (!file) return;
-    if (supportedImportMimeTypes.includes(file.type) || /\.(png|jpe?g|pdf)$/i.test(file.name)) {
-      setImportError(null);
-      onStartImport(file);
-      return;
+  const handleSidebarScroll = () => {
+    setIsSidebarScrolling(true);
+    if (scrollRevealTimeoutRef.current !== null) {
+      window.clearTimeout(scrollRevealTimeoutRef.current);
     }
-    setImportError('Filformat stöds inte. Välj PNG, JPG eller PDF.');
+    scrollRevealTimeoutRef.current = window.setTimeout(() => {
+      setIsSidebarScrolling(false);
+      scrollRevealTimeoutRef.current = null;
+    }, 650);
   };
 
   const handleChange = (key: keyof PlankSettings, val: string | number) => {
@@ -157,9 +131,6 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const maxOffset = Math.max(0, settings.length - settings.minEndPiece);
-  const maxVerticalOffset = Math.max(0, settings.width);
-  const maxMinPiece = Math.max(0, settings.length / 2);
   const isProductLimitReached = savedProducts.length >= 3;
   const isWasteLow = stats.wastePercent <= 15;
   const getStoreName = (productUrlValue: string) => {
@@ -171,19 +142,15 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <div className="w-80 h-full bg-white flex flex-col overflow-y-auto border-r border-[#E5E5E5] px-8 py-10">
-      <div className="mb-12">
-        <h1 className="serif text-3xl font-bold tracking-tight text-[#1A1A1A]">ProFloor CAD</h1>
-        <p className="text-[10px] text-[#A0A0A0] mt-2 font-medium uppercase tracking-[0.15em] leading-relaxed">
-          Planera rätt, lägg snyggt,<br/>minimera spill.
-        </p>
-      </div>
-
-      <div className="flex flex-col gap-10">
+    <div
+      data-scrolling={isSidebarScrolling ? 'true' : 'false'}
+      onScroll={handleSidebarScroll}
+      className="pf-scrollbar-on-scroll h-full min-h-0 w-full overflow-y-auto bg-white px-7 py-8"
+    >
+      <div className="flex flex-col gap-8">
         <section className="space-y-6">
-          <div className="bg-[#FDF9F8] border border-[#EAD8D1]">
+          <div className="border border-[#DFCBC2] bg-[#FCF8F6]">
             <div className="p-4 space-y-3">
-              <label className="block text-[9px] font-bold text-[#A0A0A0] uppercase tracking-[0.2em]">Produktinfo via URL</label>
               <input
                 type="text"
                 placeholder="Klistra in länk till golv..."
@@ -197,9 +164,9 @@ const Sidebar: React.FC<SidebarProps> = ({
               <button
                 onClick={fetchProductData}
                 disabled={isFetching || !productUrl.trim() || isProductLimitReached}
-                className="w-full py-3 bg-[#D2B7AC] text-white text-[10px] font-bold uppercase tracking-[0.15em] hover:bg-[#C5A599] transition-colors disabled:opacity-50"
+                className={`pf-loading-button w-full py-3 bg-[#C9A89A] text-white text-[10px] font-semibold transition-colors hover:bg-[#B69181] disabled:cursor-not-allowed disabled:opacity-55 ${isFetching ? 'is-loading' : ''}`}
               >
-                {isFetching ? 'Hämtar data...' : 'Hämta Produktdata'}
+                {isFetching ? 'Hämtar produktdata…' : 'Hämta Produktdata'}
               </button>
               {productError && (
                 <p className="text-[9px] text-red-600 leading-relaxed">{productError}</p>
@@ -236,9 +203,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                     >
                       <div>
                         <div className="flex items-center justify-between gap-2 mb-0.5">
-                          <p className="text-[8px] font-bold uppercase tracking-[0.1em] text-[#A0A0A0] truncate">{storeName}</p>
+                          <p className="text-[8px] font-medium text-[#A0A0A0] truncate">{storeName}</p>
                           {product.isCampaignPrice && (
-                            <span className="shrink-0 text-[8px] font-bold uppercase tracking-[0.1em] text-white bg-[#1A1A1A] px-1.5 py-0.5">
+                            <span className="shrink-0 text-[8px] font-semibold text-white bg-[#1A1A1A] px-1.5 py-0.5">
                               Kampanj
                             </span>
                           )}
@@ -254,7 +221,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                             <p className="text-[9px] text-[#A0A0A0]">
                               {product.pricePerPackage} {product.currency} / pkt
                             </p>
-                            <div className="mt-1 text-[8px] uppercase tracking-[0.1em] text-[#A0A0A0]">
+                            <div className="mt-1 text-[8px] text-[#A0A0A0]">
                               <span className="truncate block">Leverans: {deliveryEstimate}</span>
                             </div>
                           </div>
@@ -278,48 +245,12 @@ const Sidebar: React.FC<SidebarProps> = ({
             )}
           </div>
 
-          <div
-            onDragEnter={(e) => { e.preventDefault(); setIsDragActive(true); }}
-            onDragOver={(e) => { e.preventDefault(); setIsDragActive(true); }}
-            onDragLeave={(e) => {
-              e.preventDefault();
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setIsDragActive(false);
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              setIsDragActive(false);
-              startImportFromFile(e.dataTransfer.files?.[0]);
-            }}
-          >
-            <input
-              ref={importInputRef}
-              type="file"
-              accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
-              className="hidden"
-              onChange={(e) => {
-                startImportFromFile(e.target.files?.[0]);
-                e.currentTarget.value = '';
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => importInputRef.current?.click()}
-              className={`w-full py-4 bg-white border text-[11px] font-bold uppercase tracking-[0.2em] transition-colors flex items-center justify-center gap-2 ${isDragActive ? 'border-[#1A1A1A] text-[#1A1A1A] bg-[#FDF9F8]' : 'border-[#D2B7AC] text-[#D2B7AC] hover:bg-[#FDF9F8]'}`}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-              Importera Ritning
-            </button>
-	          </div>
-            {importError && (
-              <p className="text-[9px] text-red-600 mt-2">{importError}</p>
-            )}
-
-	          <div className="space-y-8">
-	            <div>
-	              <label className="block text-[9px] font-bold text-[#A0A0A0] uppercase tracking-[0.2em] mb-4">Plankmått (mm)</label>
+		          <div className="space-y-8">
+		            <div>
+		              <label className="block text-[9px] font-medium text-[#8B8B8B] mb-4">Plankmått (mm)</label>
               <div className="flex gap-4">
                 <div className="flex-1">
-                  <span className="text-[9px] text-[#A0A0A0] block mb-1 uppercase font-bold">Längd</span>
+                  <span className="text-[9px] text-[#8B8B8B] block mb-1 font-medium">Längd</span>
                   <input 
                     type="number" 
                     min="0"
@@ -329,7 +260,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   />
                 </div>
                 <div className="flex-1">
-                  <span className="text-[9px] text-[#A0A0A0] block mb-1 uppercase font-bold">Bredd</span>
+                  <span className="text-[9px] text-[#8B8B8B] block mb-1 font-medium">Bredd</span>
                   <input 
                     type="number" 
                     min="0"
@@ -340,80 +271,36 @@ const Sidebar: React.FC<SidebarProps> = ({
 	                </div>
 	              </div>
                 <div className="mt-4">
-                  <label className="block text-[9px] font-bold text-[#A0A0A0] uppercase tracking-[0.2em] mb-2">Antal per förpackning</label>
+                  <label className="block text-[9px] font-medium text-[#8B8B8B] mb-2">Antal per förpackning</label>
                   <input 
                     type="number" 
                     min="1"
                     value={settings.planksPerPackage === 0 ? '' : settings.planksPerPackage}
                     onChange={(e) => handleChange('planksPerPackage', e.target.value)}
                     className="w-full bg-[#FBFBFB] border-b border-[#E5E5E5] py-2 text-sm focus:outline-none focus:border-[#D2B7AC] transition text-[#1A1A1A]"
-                  />
-                </div>
-	            </div>
-
-            <KahrsInput 
-              title="Skarvförskjutning"
-              leftLabel="Standard"
-              rightLabel={`${settings.minStagger} mm`}
-              value={settings.minStagger}
-              min={0}
-              max={settings.length}
-              step={10}
-              onChange={(val) => handleChange('minStagger', val)}
-            />
-
-            <KahrsInput 
-              title="Startförskjutning horizontellt"
-              leftLabel="Ingen"
-              rightLabel={`${settings.startOffset} mm`}
-              value={settings.startOffset}
-              min={0}
-              max={maxOffset}
-              step={10}
-              onChange={(val) => handleChange('startOffset', val)}
-            />
-
-            <KahrsInput 
-              title="Startförskjutning vertikalt"
-              leftLabel="Ingen"
-              rightLabel={`${settings.startOffsetVertical} mm`}
-              value={settings.startOffsetVertical}
-              min={0}
-              max={maxVerticalOffset}
-              step={10}
-              onChange={(val) => handleChange('startOffsetVertical', val)}
-            />
-
-            <KahrsInput 
-              title="Minsta ändbit"
-              leftLabel="Standard"
-              rightLabel={`${settings.minEndPiece} mm`}
-              value={settings.minEndPiece}
-              min={0}
-              max={maxMinPiece}
-              step={10}
-              onChange={(val) => handleChange('minEndPiece', val)}
-            />
-	          </div>
-	        </section>
+	                  />
+	                </div>
+		            </div>
+		          </div>
+		        </section>
 
         <section className="pt-8 border-t border-[#F1F1F1]">
-          <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#A0A0A0] mb-6">Specifikation</h2>
+          <h2 className="text-[9px] font-medium text-[#8B8B8B] mb-6">Specifikation</h2>
           <div className="space-y-4">
             <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
-              <span className="text-[11px] text-[#888] font-medium uppercase tracking-wider">Total Area</span>
+              <span className="text-[11px] text-[#888] font-medium">Total Area</span>
               <span className="text-lg font-bold text-[#1A1A1A]">{stats.area.toFixed(2)} m²</span>
             </div>
             <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
-              <span className="text-[11px] text-[#888] font-medium uppercase tracking-wider">Materialåtgång</span>
+              <span className="text-[11px] text-[#888] font-medium">Materialåtgång</span>
               <span className="text-lg font-bold text-[#1A1A1A]">{stats.plankCount} st</span>
             </div>
             <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
-              <span className="text-[11px] text-[#888] font-medium uppercase tracking-wider">Förpackningar</span>
+              <span className="text-[11px] text-[#888] font-medium">Förpackningar</span>
               <span className="text-lg font-bold text-[#1A1A1A]">{stats.packageCount} st</span>
             </div>
             <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
-              <span className="text-[11px] text-[#888] font-medium uppercase tracking-wider">Spillprocent</span>
+              <span className="text-[11px] text-[#888] font-medium">Spillprocent</span>
               <span className={`text-lg font-bold flex items-center gap-1 ${isWasteLow ? 'text-[#2E9B4A]' : 'text-[#D2B7AC]'}`}>
                 {isWasteLow && (
                   <svg className="w-4 h-4 text-[#2E9B4A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
@@ -429,12 +316,12 @@ const Sidebar: React.FC<SidebarProps> = ({
             {productInfo && stats.totalPrice && (
               <>
                 <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2 pt-4">
-                  <span className="text-[11px] text-[#1A1A1A] font-bold uppercase tracking-wider">Total Kostnad</span>
+                  <span className="text-[11px] text-[#1A1A1A] font-bold">Total Kostnad</span>
                   <span className="text-xl font-black text-[#1A1A1A]">{Math.round(stats.totalPrice).toLocaleString()} {productInfo.currency}</span>
                 </div>
                 {stats.area > 0 && (
                   <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
-                    <span className="text-[11px] text-[#888] font-medium uppercase tracking-wider">Pris per m²</span>
+                    <span className="text-[11px] text-[#888] font-medium">Pris per m²</span>
                     <span className="text-base font-bold text-[#1A1A1A]">
                       {Math.round(stats.totalPrice / stats.area).toLocaleString()} {productInfo.currency}/m²
                     </span>
@@ -445,12 +332,6 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </section>
 
-        <button 
-          onClick={onReset}
-          className="mt-4 w-full py-4 bg-[#1A1A1A] text-white text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#333] transition-colors active:scale-[0.98]"
-        >
-          Nollställ Ritning
-        </button>
       </div>
     </div>
   );

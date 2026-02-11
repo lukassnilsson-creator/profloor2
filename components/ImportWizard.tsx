@@ -1,12 +1,12 @@
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Point } from '../types';
+import { Point, ImportedDrawingBackground } from '../types';
 import { getDistance } from '../geometry';
 import { usePlanEditor } from '../hooks/usePlanEditor';
 
 interface ImportWizardProps {
   initialFile: File | null;
-  onComplete: (points: Point[]) => void;
+  onComplete: (points: Point[], backgroundDrawing: ImportedDrawingBackground | null) => void;
   onCancel: () => void;
 }
 
@@ -256,16 +256,37 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
 
   const finalize = () => {
     if (selectedEdgeIdx === null || detectedPoints.length < 3) return;
-    const p1 = detectedPoints[selectedEdgeIdx];
-    const p2 = detectedPoints[(selectedEdgeIdx + 1) % detectedPoints.length];
-    const normalizedDist = getDistance(p1, p2);
-    const mmPerNormalizedUnit = scaleValue / normalizedDist;
+    const imageWidth = imageRef.current?.naturalWidth || canvasRef.current?.width || 1000;
+    const imageHeight = imageRef.current?.naturalHeight || canvasRef.current?.height || 1000;
+    const toImageSpace = (point: Point) => ({
+      x: (point.x / 1000) * imageWidth,
+      y: (point.y / 1000) * imageHeight
+    });
+
+    const p1 = toImageSpace(detectedPoints[selectedEdgeIdx]);
+    const p2 = toImageSpace(detectedPoints[(selectedEdgeIdx + 1) % detectedPoints.length]);
+    const referenceDist = getDistance(p1, p2);
+    if (referenceDist <= 0) return;
+    const mmPerImageUnit = scaleValue / referenceDist;
+
     const firstPoint = detectedPoints[0];
+    const firstPointImage = toImageSpace(firstPoint);
     const mmPoints = detectedPoints.map(p => ({
-      x: (p.x - firstPoint.x) * mmPerNormalizedUnit,
-      y: (p.y - firstPoint.y) * mmPerNormalizedUnit
+      x: (toImageSpace(p).x - firstPointImage.x) * mmPerImageUnit,
+      y: (toImageSpace(p).y - firstPointImage.y) * mmPerImageUnit
     }));
-    onComplete(mmPoints);
+
+    const backgroundDrawing: ImportedDrawingBackground | null = image
+      ? {
+          src: image,
+          x: -firstPointImage.x * mmPerImageUnit,
+          y: -firstPointImage.y * mmPerImageUnit,
+          width: imageWidth * mmPerImageUnit,
+          height: imageHeight * mmPerImageUnit
+        }
+      : null;
+
+    onComplete(mmPoints, backgroundDrawing);
   };
 
   const getReferenceOverlayPosition = () => {
@@ -282,11 +303,39 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
     const edgeLength = Math.hypot(dx, dy) || 1;
     const nx = -dy / edgeLength;
     const ny = dx / edgeLength;
-    const labelOffset = 30;
+    const candidates = [34, -34, 50, -50].map((distance) => ({
+      left: canvas.offsetLeft + midX + nx * distance,
+      top: canvas.offsetTop + midY + ny * distance
+    }));
 
+    const handlePoints = detectedPoints.map((point) => ({
+      x: canvas.offsetLeft + (point.x / 1000) * canvas.width,
+      y: canvas.offsetTop + (point.y / 1000) * canvas.height
+    }));
+
+    const minDistanceToHandle = 48;
+    const selectedCandidate = candidates.find((candidate) =>
+      handlePoints.every((handlePoint) => {
+        const dx = candidate.left - handlePoint.x;
+        const dy = candidate.top - handlePoint.y;
+        return Math.hypot(dx, dy) > minDistanceToHandle;
+      })
+    ) ?? candidates[0];
+
+    const container = canvas.parentElement;
+    if (!container) return selectedCandidate;
+
+    const overlayHalfWidth = 72;
+    const overlayHalfHeight = 36;
     return {
-      left: canvas.offsetLeft + midX + nx * labelOffset,
-      top: canvas.offsetTop + midY + ny * labelOffset
+      left: Math.min(
+        container.clientWidth - overlayHalfWidth,
+        Math.max(overlayHalfWidth, selectedCandidate.left)
+      ),
+      top: Math.min(
+        container.clientHeight - overlayHalfHeight,
+        Math.max(overlayHalfHeight, selectedCandidate.top)
+      )
     };
   };
 
@@ -371,7 +420,9 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
                     setContextMenu(null);
                     return;
                   }
-                  if (hoverIdx !== null) setContextMenu({ x: e.clientX, y: e.clientY, pointIdx: hoverIdx });
+                  if (hoverIdx !== null && detectedPoints.length > 3) {
+                    setContextMenu({ x: e.clientX, y: e.clientY, pointIdx: hoverIdx });
+                  }
                 }}
                 className="shadow-2xl border border-[#E5E5E5] max-w-full max-h-full object-contain"
                 style={{ cursor: draggingIdx !== null ? 'grabbing' : hoverIdx !== null ? 'pointer' : closestEdgeIdx !== null ? 'copy' : 'crosshair' }}
@@ -380,7 +431,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
               {referenceOverlayPos && (
                 <div
                   className="absolute z-30 bg-white border border-[#D2B7AC] shadow-md px-3 py-2"
-                  style={{ left: referenceOverlayPos.left, top: referenceOverlayPos.top, transform: 'translate(-50%, -120%)' }}
+                  style={{ left: referenceOverlayPos.left, top: referenceOverlayPos.top, transform: 'translate(-50%, -50%)' }}
                 >
                   <label className="block text-[8px] font-bold text-[#A0A0A0] uppercase tracking-widest mb-1">Referens</label>
                   <div className="flex items-center gap-1">
@@ -398,7 +449,9 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
 
               {contextMenu && (
                 <div className="fixed z-50 bg-white border border-[#E5E5E5] shadow-2xl py-1 min-w-[140px]" style={{ left: contextMenu.x, top: contextMenu.y }}>
-                  <button onClick={() => handleDeletePoint(contextMenu.pointIdx)} className="w-full px-4 py-2 text-left text-[9px] font-bold uppercase tracking-widest text-red-600 hover:bg-[#FFF5F5]">Ta bort hörn</button>
+                  {detectedPoints.length > 3 && (
+                    <button onClick={() => handleDeletePoint(contextMenu.pointIdx)} className="w-full px-4 py-2 text-left text-[9px] font-bold uppercase tracking-widest text-red-600 hover:bg-[#FFF5F5]">Ta bort hörn</button>
+                  )}
                 </div>
               )}
             </div>
