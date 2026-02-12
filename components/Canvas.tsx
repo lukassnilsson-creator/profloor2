@@ -481,7 +481,7 @@ const Canvas: React.FC<CanvasProps> = ({
         if (draggingIdx === index) {
           const { angle, labelPos } = getAngleAtVertex(index, points);
           ctx.fillStyle = '#1A1A1A';
-          ctx.font = '600 12px Inter';
+          ctx.font = '600 12px Public Sans';
           ctx.textAlign = 'center';
           ctx.fillText(`${Math.round(angle)}°`, labelPos.x * scale, labelPos.y * scale);
         }
@@ -836,14 +836,14 @@ const Canvas: React.FC<CanvasProps> = ({
                   }
                   setContextMenu(null);
                 }}
-                className="w-full px-4 py-2 text-left text-[10px] font-medium hover:bg-[#F6F2EF]"
+                className="pf-action-heading w-full px-4 py-2 text-left font-medium hover:bg-[#F6F2EF]"
               >
                 Välj som start
               </button>
               {points.length > 3 && (
                 <button
                   onClick={() => handleDeletePoint(contextMenu.pointIdx)}
-                  className="w-full px-4 py-2 text-left text-[10px] font-medium text-red-700 hover:bg-[#FFF4F4]"
+                  className="pf-action-heading w-full px-4 py-2 text-left font-medium text-red-700 hover:bg-[#FFF4F4]"
                 >
                   Ta bort hörn
                 </button>
@@ -857,7 +857,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   onToggleSnapToGrid();
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 px-4 py-2 text-left text-[10px] font-medium text-[#1A1A1A] hover:bg-[#F6F2EF]"
+                className="pf-action-heading flex w-full items-center gap-2 px-4 py-2 text-left font-medium text-[#1A1A1A] hover:bg-[#F6F2EF]"
               >
                 <span className={`inline-flex h-3.5 w-3.5 items-center justify-center border text-[9px] ${snapToGrid ? 'border-[#B69181] bg-[#F6F0EC] text-[#8F6655]' : 'border-[#D9D4CF] bg-white text-transparent'}`}>✓</span>
                 <span>Snap</span>
@@ -869,7 +869,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   onToggleEdgeLengths();
                   setContextMenu(null);
                 }}
-                className="flex w-full items-center gap-2 px-4 py-2 text-left text-[10px] font-medium text-[#1A1A1A] hover:bg-[#F6F2EF]"
+                className="pf-action-heading flex w-full items-center gap-2 px-4 py-2 text-left font-medium text-[#1A1A1A] hover:bg-[#F6F2EF]"
               >
                 <span className={`inline-flex h-3.5 w-3.5 items-center justify-center border text-[9px] ${showEdgeLengths ? 'border-[#B69181] bg-[#F6F0EC] text-[#8F6655]' : 'border-[#D9D4CF] bg-white text-transparent'}`}>✓</span>
                 <span>Golvmått</span>
@@ -883,7 +883,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   onToggleBackgroundDrawing();
                   setContextMenu(null);
                 }}
-                className={`flex w-full items-center gap-2 px-4 py-2 text-left text-[10px] font-medium ${backgroundDrawing ? 'text-[#1A1A1A] hover:bg-[#F6F2EF]' : 'cursor-not-allowed text-[#A5A5A5]'}`}
+                className={`pf-action-heading flex w-full items-center gap-2 px-4 py-2 text-left font-medium ${backgroundDrawing ? 'text-[#1A1A1A] hover:bg-[#F6F2EF]' : 'cursor-not-allowed text-[#A5A5A5]'}`}
               >
                 <span className={`inline-flex h-3.5 w-3.5 items-center justify-center border text-[9px] ${backgroundDrawing && showBackgroundDrawing ? 'border-[#B69181] bg-[#F6F0EC] text-[#8F6655]' : 'border-[#D9D4CF] bg-white text-transparent'}`}>✓</span>
                 <span>Bakgrundsritning</span>
@@ -897,7 +897,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   onZoomExtents();
                   setContextMenu(null);
                 }}
-                className="w-full px-4 py-2 text-left text-[10px] font-medium text-[#1A1A1A] hover:bg-[#F6F2EF]"
+                className="pf-action-heading w-full px-4 py-2 text-left font-medium text-[#1A1A1A] hover:bg-[#F6F2EF]"
               >
                 Zoom extents
               </button>
@@ -948,7 +948,7 @@ const Canvas: React.FC<CanvasProps> = ({
                 <button
                   type="button"
                   onClick={onToggleSnapToGrid}
-                  className={`rounded border px-2 py-1.5 text-[10px] font-medium transition-colors ${
+                  className={`pf-action-heading rounded border px-2 py-1.5 font-medium transition-colors ${
                     snapToGrid
                       ? 'border-[#B69181] bg-[#F6F0EC] text-[#1A1A1A]'
                       : 'border-[#D9D4CF] bg-white text-[#666]'
@@ -959,7 +959,7 @@ const Canvas: React.FC<CanvasProps> = ({
                 <button
                   type="button"
                   onClick={onToggleEdgeLengths}
-                  className={`rounded border px-2 py-1.5 text-[10px] font-medium transition-colors ${
+                  className={`pf-action-heading rounded border px-2 py-1.5 font-medium transition-colors ${
                     showEdgeLengths
                       ? 'border-[#B69181] bg-[#F6F0EC] text-[#1A1A1A]'
                       : 'border-[#D9D4CF] bg-white text-[#666]'
@@ -977,7 +977,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   type="button"
                   disabled={!backgroundDrawing}
                   onClick={onToggleBackgroundDrawing}
-                  className={`text-[10px] font-medium ${
+                  className={`pf-action-heading font-medium ${
                     backgroundDrawing ? 'text-[#1A1A1A] hover:text-[#8F6655]' : 'text-[#9A9A9A]'
                   }`}
                 >
@@ -1006,7 +1006,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   <button
                     type="button"
                     onClick={onRemoveBackgroundDrawing}
-                    className="w-full rounded border border-[#E0C6BC] bg-[#FFF8F6] px-2 py-1.5 text-[10px] font-medium text-[#8D4F3A] transition-colors hover:bg-[#FFF1ED]"
+                    className="pf-action-heading w-full rounded border border-[#E0C6BC] bg-[#FFF8F6] px-2 py-1.5 font-medium text-[#8D4F3A] transition-colors hover:bg-[#FFF1ED]"
                   >
                     Ta bort bakgrund
                   </button>
@@ -1019,7 +1019,7 @@ const Canvas: React.FC<CanvasProps> = ({
             <div className="border-t border-[#ECE7E3] pt-2">
               <button
                 type="button"
-                className="flex w-full items-center justify-between text-[10px] font-medium text-[#666]"
+                className="pf-action-heading flex w-full items-center justify-between font-medium text-[#666]"
                 onClick={() => setIsLegendExpanded((prev) => !prev)}
               >
                 <span>Förklaring</span>

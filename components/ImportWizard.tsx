@@ -346,10 +346,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
       <div className="max-w-5xl w-full h-full flex flex-col bg-white overflow-hidden shadow-2xl border border-[#E5E5E5]">
         <header className="p-6 md:p-8 border-b border-[#F1F1F1] flex justify-between items-center">
           <div>
-            <h2 className="serif text-xl md:text-2xl font-bold">Importera Ritning</h2>
+            <h2 className="text-xl md:text-2xl font-bold">Importera Ritning</h2>
             <p className="text-[9px] md:text-[10px] text-[#A0A0A0] uppercase tracking-widest mt-1">Automatisk tolkning av ritning</p>
           </div>
-          <button onClick={onCancel} className="text-[10px] font-bold uppercase tracking-widest text-[#A0A0A0] hover:text-[#1A1A1A]">Avbryt</button>
+          <button onClick={onCancel} className="pf-action-heading font-bold uppercase tracking-widest text-[#A0A0A0] hover:text-[#1A1A1A]">Avbryt</button>
         </header>
 
         <div className="flex-1 overflow-hidden relative bg-[#FBFBFB] flex items-center justify-center p-4">
@@ -376,7 +376,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
                         runAIAnalysis(image);
                       }
                     }}
-                    className="px-6 py-2 bg-[#1A1A1A] text-white text-[10px] font-bold uppercase tracking-widest hover:bg-[#333] transition-colors"
+                    className="pf-action-heading px-6 py-2 bg-[#1A1A1A] text-white font-bold uppercase tracking-widest hover:bg-[#333] transition-colors"
                   >
                     Försök igen
                   </button>

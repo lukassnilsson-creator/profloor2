@@ -140,6 +140,30 @@ const Sidebar: React.FC<SidebarProps> = ({
       return 'Okänt';
     }
   };
+  const getPricePerSquareMeter = (product: SavedProduct) => {
+    const packageAreaM2 = (product.lengthMm * product.widthMm * product.planksPerPackage) / 1_000_000;
+    if (!Number.isFinite(packageAreaM2) || packageAreaM2 <= 0) {
+      return null;
+    }
+    return product.pricePerPackage / packageAreaM2;
+  };
+  const getPromotionLabel = (product: SavedProduct) => {
+    if (!product.isCampaignPrice) {
+      return null;
+    }
+    const textBlob = [product.name, product.stockStatus, product.deliveryEstimate]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    if (textBlob.includes('utförsälj') || textBlob.includes('utforsalj')) {
+      return 'Utförsäljning';
+    }
+    if (textBlob.includes('extrapris')) {
+      return 'Extrapris';
+    }
+    return 'Kampanj';
+  };
+  const formatPrice = (value: number, currency: string) => `${Math.round(value).toLocaleString()} ${currency}`;
 
   return (
     <div
@@ -149,105 +173,114 @@ const Sidebar: React.FC<SidebarProps> = ({
     >
       <div className="flex flex-col gap-8">
         <section className="space-y-6">
-          <div className="border border-[#DFCBC2] bg-[#FCF8F6]">
-            <div className="p-4 space-y-3">
-              <input
-                type="text"
-                placeholder="Klistra in länk till golv..."
-                value={productUrl}
-                onChange={(e) => {
-                  setProductUrl(e.target.value);
-                  if (productError) setProductError(null);
-                }}
-                className="w-full bg-white border border-[#E5E5E5] px-3 py-2 text-[10px] focus:outline-none focus:border-[#D2B7AC] transition"
-              />
-              <button
-                onClick={fetchProductData}
-                disabled={isFetching || !productUrl.trim() || isProductLimitReached}
-                className={`pf-loading-button w-full py-3 bg-[#C9A89A] text-white text-[10px] font-semibold transition-colors hover:bg-[#B69181] disabled:cursor-not-allowed disabled:opacity-55 ${isFetching ? 'is-loading' : ''}`}
-              >
-                {isFetching ? 'Hämtar produktdata…' : 'Hämta Produktdata'}
-              </button>
-              {productError && (
-                <p className="text-[9px] text-red-600 leading-relaxed">{productError}</p>
-              )}
-              {isProductLimitReached && (
-                <p className="text-[9px] text-[#A0A0A0] leading-relaxed">Max 3 produkter samtidigt.</p>
-              )}
-            </div>
-            {savedProducts.length > 0 && (
-              <div className="pt-1">
-                <div className="border-t border-[#EAD8D1]"></div>
-                {savedProducts.map((product, index) => {
-                  const totalPrice = productTotalsById[product.id] ?? 0;
-                  const isActive = activeProductId === product.id;
-                  const storeName = getStoreName(product.url);
-                  const deliveryEstimate = product.deliveryEstimate?.trim() || 'Okänt';
-                  return (
-                    <div
-                      key={product.id}
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => onSelectProduct(product)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault();
-                          onSelectProduct(product);
-                        }
-                      }}
-                      className={`w-full px-4 py-2.5 text-left transition-colors cursor-pointer hover:bg-white/40 ${
-                        isActive ? 'bg-white' : ''
-                      } ${
-                        index > 0 ? 'border-t border-[#EAD8D1]' : ''
-                      }`}
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-2 mb-0.5">
-                          <p className="text-[8px] font-medium text-[#A0A0A0] truncate">{storeName}</p>
-                          {product.isCampaignPrice && (
-                            <span className="shrink-0 text-[8px] font-semibold text-white bg-[#1A1A1A] px-1.5 py-0.5">
-                              Kampanj
+          <div className="space-y-3">
+            <input
+              type="text"
+              placeholder={isProductLimitReached ? 'Max 3 produkter samtidigt' : 'Klistra in länk till golv...'}
+              value={productUrl}
+              onChange={(e) => {
+                setProductUrl(e.target.value);
+                if (productError) setProductError(null);
+              }}
+              className="w-full bg-white border border-[#E5E5E5] px-3 py-2 text-[10px] focus:outline-none focus:border-[#D2B7AC] transition"
+            />
+            <button
+              onClick={fetchProductData}
+              disabled={isFetching || !productUrl.trim() || isProductLimitReached}
+              className={`pf-action-heading pf-loading-button w-full py-3 bg-[#C9A89A] text-white font-semibold transition-colors hover:bg-[#B69181] disabled:cursor-not-allowed disabled:opacity-55 ${isFetching ? 'is-loading' : ''}`}
+            >
+              {isFetching ? 'Hämtar produktdata…' : 'Hämta Produktdata'}
+            </button>
+            {productError && (
+              <p className="text-[9px] text-red-600 leading-relaxed">{productError}</p>
+            )}
+            {isProductLimitReached && (
+              <p className="text-[9px] text-[#8B8B8B] leading-relaxed">Max 3 produkter samtidigt</p>
+            )}
+          </div>
+
+          {savedProducts.length > 0 && (
+            <div className="border-t border-[#EAD8D1]">
+              {savedProducts.map((product) => {
+                const totalPrice = productTotalsById[product.id] ?? 0;
+                const isActive = activeProductId === product.id;
+                const storeName = getStoreName(product.url);
+                const pricePerSquareMeter = getPricePerSquareMeter(product);
+                const promotionLabel = getPromotionLabel(product);
+                const deliveryEstimate = product.deliveryEstimate?.trim() || 'Okänd leveranstid';
+
+                return (
+                  <div
+                    key={product.id}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => onSelectProduct(product)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        onSelectProduct(product);
+                      }
+                    }}
+                    className={`w-full border-b py-2.5 text-left transition-colors cursor-pointer hover:bg-[#FAF8F7] ${
+                      isActive ? 'border-[#C1463A] bg-[#FFFDFC]' : 'border-[#EAD8D1]'
+                    }`}
+                  >
+                    <div className="min-w-0 space-y-1.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="min-w-0 truncate text-[8px] font-medium text-[#8B8B8B]">{storeName}</p>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {promotionLabel && (
+                            <span className="border border-[#1A1A1A] px-1.5 py-0.5 text-[8px] font-semibold text-[#1A1A1A]">
+                              {promotionLabel}
                             </span>
                           )}
-                        </div>
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <p className={`text-[9px] font-bold truncate ${isActive ? 'text-[#1A1A1A]' : 'text-[#333]'}`}>{product.name}</p>
-                              <p className="text-[9px] font-bold text-[#1A1A1A] text-right shrink-0">
-                                {Math.round(totalPrice).toLocaleString()} {product.currency}
-                              </p>
-                            </div>
-                            <p className="text-[9px] text-[#A0A0A0]">
-                              {product.pricePerPackage} {product.currency} / pkt
-                            </p>
-                            <div className="mt-1 text-[8px] text-[#A0A0A0]">
-                              <span className="truncate block">Leverans: {deliveryEstimate}</span>
-                            </div>
-                          </div>
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               onRemoveProduct(product.id);
                             }}
-                            className="w-4 h-4 text-[10px] leading-none text-[#A0A0A0] hover:text-[#1A1A1A] shrink-0 mt-0.5"
+                            className="inline-flex h-5 w-5 items-center justify-center text-[12px] leading-none text-[#8B8B8B] hover:text-[#1A1A1A]"
                             aria-label={`Ta bort ${product.name}`}
                           >
                             ×
                           </button>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
 
-		          <div className="space-y-8">
-		            <div>
-		              <label className="block text-[9px] font-medium text-[#8B8B8B] mb-4">Plankmått (mm)</label>
+                      <p
+                        className={`min-w-0 text-[10px] font-semibold leading-snug break-words ${isActive ? 'text-[#1A1A1A]' : 'text-[#2E2E2E]'}`}
+                        style={{
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden'
+                        }}
+                      >
+                        {product.name}
+                      </p>
+
+                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px]">
+                        <span className="font-medium text-[#3F3F3F]">{formatPrice(product.pricePerPackage, product.currency)} / pkt</span>
+                        <span className="text-[#777]">
+                          {pricePerSquareMeter ? `${formatPrice(pricePerSquareMeter, product.currency)} / m²` : 'Pris/m² saknas'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3 text-[8px] leading-relaxed text-[#8B8B8B]">
+                        <span className="min-w-0 truncate">Leverans: {deliveryEstimate}</span>
+                        <span className="shrink-0 text-right font-semibold text-[#1A1A1A]">{formatPrice(totalPrice, product.currency)} total</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <div className="space-y-8">
+            <div>
+              <label className="block text-[9px] font-medium text-[#8B8B8B] mb-4">Plankmått (mm)</label>
               <div className="flex gap-4">
                 <div className="flex-1">
                   <span className="text-[9px] text-[#8B8B8B] block mb-1 font-medium">Längd</span>
@@ -267,22 +300,22 @@ const Sidebar: React.FC<SidebarProps> = ({
                     value={settings.width === 0 ? '' : settings.width}
                     onChange={(e) => handleChange('width', e.target.value)}
                     className="w-full bg-[#FBFBFB] border-b border-[#E5E5E5] py-2 text-sm focus:outline-none focus:border-[#D2B7AC] transition text-[#1A1A1A]"
-	                  />
-	                </div>
-	              </div>
-                <div className="mt-4">
-                  <label className="block text-[9px] font-medium text-[#8B8B8B] mb-2">Antal per förpackning</label>
-                  <input 
-                    type="number" 
-                    min="1"
-                    value={settings.planksPerPackage === 0 ? '' : settings.planksPerPackage}
-                    onChange={(e) => handleChange('planksPerPackage', e.target.value)}
-                    className="w-full bg-[#FBFBFB] border-b border-[#E5E5E5] py-2 text-sm focus:outline-none focus:border-[#D2B7AC] transition text-[#1A1A1A]"
-	                  />
-	                </div>
-		            </div>
-		          </div>
-		        </section>
+                  />
+                </div>
+              </div>
+              <div className="mt-4">
+                <label className="block text-[9px] font-medium text-[#8B8B8B] mb-2">Antal per förpackning</label>
+                <input 
+                  type="number" 
+                  min="1"
+                  value={settings.planksPerPackage === 0 ? '' : settings.planksPerPackage}
+                  onChange={(e) => handleChange('planksPerPackage', e.target.value)}
+                  className="w-full bg-[#FBFBFB] border-b border-[#E5E5E5] py-2 text-sm focus:outline-none focus:border-[#D2B7AC] transition text-[#1A1A1A]"
+                />
+              </div>
+            </div>
+          </div>
+        </section>
 
         <section className="pt-8 border-t border-[#F1F1F1]">
           <h2 className="text-[9px] font-medium text-[#8B8B8B] mb-6">Specifikation</h2>

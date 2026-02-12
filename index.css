@@ -15,8 +15,13 @@
 @layer base {
   body {
     @apply font-sans overflow-hidden;
+    font-family: 'Public Sans', sans-serif;
     background: var(--pf-bg);
     color: var(--pf-text);
+  }
+
+  #root {
+    font-family: 'Public Sans', sans-serif;
   }
 
   :where(button, input, select, textarea) {
@@ -56,6 +61,9 @@
   .pf-body {
     @apply text-[13px] leading-relaxed;
     color: var(--pf-text);
+  }
+  .pf-action-heading {
+    @apply text-[11px] leading-[1.25];
   }
   .kahrs-slider {
     -webkit-appearance: none;

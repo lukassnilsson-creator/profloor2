@@ -1300,7 +1300,7 @@ const App: React.FC = () => {
                             setTabContextMenu({ x: event.clientX, y: event.clientY, designId: design.id });
                           }}
                           style={{ width: tabWidth }}
-                          className={`relative flex h-8 min-w-[168px] max-w-[320px] items-center rounded-t-[4px] rounded-b-none border px-4 pr-9 text-[10px] font-medium whitespace-nowrap transition-colors ${
+                          className={`pf-action-heading relative flex h-8 min-w-[168px] max-w-[320px] items-center rounded-t-[4px] rounded-b-none border px-4 pr-9 font-medium whitespace-nowrap transition-colors ${
                             isActive
                               ? 'z-10 -mb-px border-[#D7CFC9] border-b-white bg-white text-[#171717]'
                               : 'border-transparent bg-[#E5DEDA] text-[#6A6A6A] hover:bg-[#ECE5E1] hover:text-[#1A1A1A]'
@@ -1438,7 +1438,7 @@ const App: React.FC = () => {
                     setIsImportDropActive(false);
                     handleCanvasImportFile(event.dataTransfer.files?.[0]);
                   }}
-                  className={`flex h-8 items-center justify-center gap-1.5 border px-2.5 text-[10px] font-medium text-[#4D4D4D] transition-colors hover:text-[#171717] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B69181] ${
+                  className={`pf-action-heading flex h-8 items-center justify-center gap-1.5 border px-2.5 font-medium text-[#4D4D4D] transition-colors hover:text-[#171717] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B69181] ${
                     isImportDropActive
                       ? 'border-[#B69181] bg-[#F7F4F1]'
                       : 'border-[#D8D3CE] bg-white'
@@ -1549,7 +1549,7 @@ const App: React.FC = () => {
             <button
               type="button"
               onClick={handleTabContextRename}
-              className="w-full px-4 py-2 text-left text-[10px] font-medium text-[#1A1A1A] hover:bg-[#F4F1EE]"
+              className="pf-action-heading w-full px-4 py-2 text-left font-medium text-[#1A1A1A] hover:bg-[#F4F1EE]"
             >
               Byt namn
             </button>
