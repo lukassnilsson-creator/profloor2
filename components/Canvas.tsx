@@ -825,6 +825,7 @@ const Canvas: React.FC<CanvasProps> = ({
         <div
           className="fixed z-50 min-w-[190px] border border-[#D9D4CF] bg-white py-1 shadow-2xl"
           style={{ left: contextMenu.x, top: contextMenu.y }}
+          onClick={(event) => event.stopPropagation()}
         >
           {contextMenu.kind === 'point' ? (
             <>
@@ -888,6 +889,41 @@ const Canvas: React.FC<CanvasProps> = ({
                 <span className={`inline-flex h-3.5 w-3.5 items-center justify-center border text-[9px] ${backgroundDrawing && showBackgroundDrawing ? 'border-[#B69181] bg-[#F6F0EC] text-[#8F6655]' : 'border-[#D9D4CF] bg-white text-transparent'}`}>✓</span>
                 <span>Bakgrundsritning</span>
               </button>
+
+              <div className="space-y-2 px-4 pb-2 pt-1">
+                <div>
+                  <div className="mb-0.5 flex items-center justify-between">
+                    <label className="text-[9px] font-medium text-[#686868]">Opacitet</label>
+                    <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(backgroundOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={Math.round(backgroundOpacity * 100)}
+                    disabled={!backgroundDrawing}
+                    onChange={(event) => onBackgroundOpacityChange((parseInt(event.target.value, 10) || 0) / 100)}
+                    className="kahrs-slider disabled:opacity-40"
+                  />
+                </div>
+
+                <div>
+                  <div className="mb-0.5 flex items-center justify-between">
+                    <label className="text-[9px] font-medium text-[#686868]">Mönsterkontrast</label>
+                    <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(settings.visualContrast * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="1"
+                    step="0.1"
+                    value={settings.visualContrast}
+                    onChange={(event) => setSettings({ ...settings, visualContrast: parseFloat(event.target.value) })}
+                    className="kahrs-slider"
+                  />
+                </div>
+              </div>
 
               <div className="my-1 border-t border-[#ECE7E3]" />
 

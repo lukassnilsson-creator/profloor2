@@ -655,7 +655,23 @@ const App: React.FC = () => {
   };
 
   const setActiveSettings = (nextSettings: PlankSettings) => {
-    updateActiveDesign((design) => ({ ...design, settings: nextSettings }));
+    updateActiveDesign((design) => {
+      if (!design.activeProductId) {
+        return {
+          ...design,
+          settings: nextSettings
+        };
+      }
+
+      return {
+        ...design,
+        settings: nextSettings,
+        productSettingsById: {
+          ...design.productSettingsById,
+          [design.activeProductId]: toProductDesignSettings(nextSettings)
+        }
+      };
+    });
   };
 
   const setActiveScale = (nextScale: number) => {
@@ -834,23 +850,7 @@ const App: React.FC = () => {
   };
 
   const handleSidebarSettingsChange = (nextSettings: PlankSettings) => {
-    updateActiveDesign((design) => {
-      if (!design.activeProductId) {
-        return {
-          ...design,
-          settings: nextSettings
-        };
-      }
-
-      return {
-        ...design,
-        settings: nextSettings,
-        productSettingsById: {
-          ...design.productSettingsById,
-          [design.activeProductId]: toProductDesignSettings(nextSettings)
-        }
-      };
-    });
+    setActiveSettings(nextSettings);
   };
 
   const handleReset = () => {

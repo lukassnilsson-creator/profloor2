@@ -140,6 +140,21 @@ const Sidebar: React.FC<SidebarProps> = ({
       return 'Okänt';
     }
   };
+  const getProductPathPreview = (productUrlValue: string) => {
+    try {
+      const parsed = new URL(productUrlValue);
+      const trimmedPath = parsed.pathname.replace(/^\/+/, '');
+      if (!trimmedPath) {
+        return '/';
+      }
+      const previewLength = 10;
+      const preview = trimmedPath.slice(0, previewLength);
+      const hasMore = trimmedPath.length > previewLength;
+      return `/${preview}${hasMore ? '…' : ''}`;
+    } catch {
+      return '/';
+    }
+  };
   const getPricePerSquareMeter = (product: SavedProduct) => {
     const packageAreaM2 = (product.lengthMm * product.widthMm * product.planksPerPackage) / 1_000_000;
     if (!Number.isFinite(packageAreaM2) || packageAreaM2 <= 0) {
@@ -147,6 +162,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
     return product.pricePerPackage / packageAreaM2;
   };
+  const formatCurrencyLabel = (currency: string) => (currency.trim().toUpperCase() === 'SEK' ? 'kr' : currency);
   const getPromotionLabel = (product: SavedProduct) => {
     if (!product.isCampaignPrice) {
       return null;
@@ -163,7 +179,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
     return 'Kampanj';
   };
-  const formatPrice = (value: number, currency: string) => `${Math.round(value).toLocaleString()} ${currency}`;
+  const formatPrice = (value: number, currency: string) =>
+    `${Math.round(value).toLocaleString()} ${formatCurrencyLabel(currency)}`;
 
   return (
     <div
@@ -227,7 +244,19 @@ const Sidebar: React.FC<SidebarProps> = ({
                   >
                     <div className="min-w-0 space-y-1.5">
                       <div className="flex items-center justify-between gap-3">
-                        <p className="min-w-0 truncate text-[8px] font-medium text-[#8B8B8B]">{storeName}</p>
+                        <div className="flex min-w-0 items-center">
+                          <p className="shrink-0 text-[8px] font-medium text-[#8B8B8B]">{storeName}</p>
+                          <a
+                            href={product.url}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            onClick={(e) => e.stopPropagation()}
+                            className="min-w-0 truncate text-[8px] text-[#6C6C6C] underline decoration-[#B9B9B9] underline-offset-2 hover:text-[#1A1A1A]"
+                            title={product.url}
+                          >
+                            {getProductPathPreview(product.url)}
+                          </a>
+                        </div>
                         <div className="flex shrink-0 items-center gap-2">
                           {promotionLabel && (
                             <span className="border border-[#1A1A1A] px-1.5 py-0.5 text-[8px] font-semibold text-[#1A1A1A]">
@@ -318,7 +347,6 @@ const Sidebar: React.FC<SidebarProps> = ({
         </section>
 
         <section className="pt-8 border-t border-[#F1F1F1]">
-          <h2 className="text-[9px] font-medium text-[#8B8B8B] mb-6">Specifikation</h2>
           <div className="space-y-4">
             <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
               <span className="text-[11px] text-[#888] font-medium">Total Area</span>
@@ -350,16 +378,10 @@ const Sidebar: React.FC<SidebarProps> = ({
               <>
                 <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2 pt-4">
                   <span className="text-[11px] text-[#1A1A1A] font-bold">Total Kostnad</span>
-                  <span className="text-xl font-black text-[#1A1A1A]">{Math.round(stats.totalPrice).toLocaleString()} {productInfo.currency}</span>
+                  <span className="text-xl font-black text-[#1A1A1A]">
+                    {Math.round(stats.totalPrice).toLocaleString()} {formatCurrencyLabel(productInfo.currency)}
+                  </span>
                 </div>
-                {stats.area > 0 && (
-                  <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
-                    <span className="text-[11px] text-[#888] font-medium">Pris per m²</span>
-                    <span className="text-base font-bold text-[#1A1A1A]">
-                      {Math.round(stats.totalPrice / stats.area).toLocaleString()} {productInfo.currency}/m²
-                    </span>
-                  </div>
-                )}
               </>
             )}
           </div>
