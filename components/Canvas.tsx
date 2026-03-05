@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
-import { Point, PlankSettings, PlankInstance, WastePiece, ImportedDrawingBackground } from '../types';
+import { Point, PlankSettings, PlankInstance, WastePiece, ImportedDrawingBackground, Stats, ProductInfo } from '../types';
 import { findClosestEdge, getDistance, movePointByLength, isPointInPolygon } from '../geometry';
 import { getHoverPointIndex } from '../pointEditing';
 import { usePlanEditor } from '../hooks/usePlanEditor';
@@ -29,6 +29,8 @@ interface CanvasProps {
   onRemoveBackgroundDrawing: () => void;
   onZoomExtents: () => void;
   showFloatingToolPanel?: boolean;
+  stats: Stats;
+  productInfo: ProductInfo | null;
 }
 
 interface PointContextMenu {
@@ -105,7 +107,9 @@ const Canvas: React.FC<CanvasProps> = ({
   onBackgroundOpacityChange,
   onRemoveBackgroundDrawing,
   onZoomExtents,
-  showFloatingToolPanel = true
+  showFloatingToolPanel = true,
+  stats,
+  productInfo
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -122,6 +126,7 @@ const Canvas: React.FC<CanvasProps> = ({
   const [lastPanPos, setLastPanPos] = useState({ x: 0, y: 0 });
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
+  const [gridOpacity, setGridOpacity] = useState(0.58);
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [toolPanelOffset, setToolPanelOffset] = useState(loadToolPanelOffset);
 
@@ -392,7 +397,7 @@ const Canvas: React.FC<CanvasProps> = ({
       }
     }
 
-    ctx.strokeStyle = 'rgba(232, 227, 222, 0.58)';
+    ctx.strokeStyle = `rgba(232, 227, 222, ${gridOpacity})`;
     ctx.lineWidth = 1;
     const visualGridSize = gridSize * scale;
     if (visualGridSize > 5) {
@@ -821,6 +826,47 @@ const Canvas: React.FC<CanvasProps> = ({
         </div>
       )}
 
+      {/* Floating stats panel */}
+      <div className="pointer-events-auto absolute bottom-5 left-1/2 z-30 -translate-x-1/2">
+        <div className="flex items-stretch overflow-hidden rounded-full border border-[#D9D4CF] bg-white shadow-[0_4px_20px_rgba(0,0,0,0.12)]">
+          <div className="flex w-[108px] flex-shrink-0 flex-col items-center justify-center py-3">
+            <span className="text-[9px] font-medium text-[#9A9A9A] whitespace-nowrap">Area</span>
+            <span className="mt-0.5 text-[13px] font-bold leading-none text-[#1A1A1A] whitespace-nowrap">{stats.area.toFixed(2)} m²</span>
+          </div>
+          <div className="w-px self-stretch bg-[#EAE6E3] my-3" />
+          <div className="flex w-[90px] flex-shrink-0 flex-col items-center justify-center py-3">
+            <span className="text-[9px] font-medium text-[#9A9A9A] whitespace-nowrap">Åtgång</span>
+            <span className="mt-0.5 text-[13px] font-bold leading-none text-[#1A1A1A] whitespace-nowrap">{stats.plankCount} st</span>
+          </div>
+          <div className="w-px self-stretch bg-[#EAE6E3] my-3" />
+          <div className="flex w-[80px] flex-shrink-0 flex-col items-center justify-center py-3">
+            <span className="text-[9px] font-medium text-[#9A9A9A] whitespace-nowrap">Förp.</span>
+            <span className="mt-0.5 text-[13px] font-bold leading-none text-[#1A1A1A] whitespace-nowrap">{stats.packageCount} st</span>
+          </div>
+          <div className="w-px self-stretch bg-[#EAE6E3] my-3" />
+          <div className="flex w-[84px] flex-shrink-0 flex-col items-center justify-center py-3">
+            <span className="text-[9px] font-medium text-[#9A9A9A] whitespace-nowrap">Spill</span>
+            <span className={`mt-0.5 text-[13px] font-bold leading-none whitespace-nowrap ${stats.wastePercent <= 15 ? 'text-[#3D8B37]' : 'text-[#C41230]'}`}>
+              {stats.wastePercent.toFixed(1)}%
+            </span>
+          </div>
+          {productInfo && stats.totalPrice ? (
+            <>
+              <div className="w-px self-stretch bg-[#EAE6E3] my-3" />
+              <div className="flex w-[124px] flex-shrink-0 flex-col items-center justify-center py-3">
+                <span className="text-[9px] font-medium text-[#9A9A9A] whitespace-nowrap">Sum tot</span>
+                <span className="mt-0.5 text-[13px] font-bold leading-none text-[#1A1A1A] whitespace-nowrap">
+                  {Math.round(stats.totalPrice).toLocaleString()} {productInfo.currency.trim().toUpperCase() === 'SEK' ? 'kr' : productInfo.currency}
+                </span>
+              </div>
+              <button type="button" className="self-stretch rounded-full bg-[#3D8B37] px-8 mx-2 my-2 text-[10px] font-bold tracking-wide text-white whitespace-nowrap transition-colors hover:bg-[#2e6a2a]">LÄGG I VARUKORG</button>
+            </>
+          ) : (
+            <button type="button" className="self-stretch rounded-full bg-[#3D8B37] px-8 mx-2 my-2 text-[10px] font-bold tracking-wide text-white whitespace-nowrap transition-colors hover:bg-[#2e6a2a]">LÄGG I VARUKORG</button>
+          )}
+        </div>
+      </div>
+
       {contextMenu && (
         <div
           className="fixed z-50 min-w-[190px] border border-[#D9D4CF] bg-white py-1 shadow-2xl"
@@ -891,6 +937,21 @@ const Canvas: React.FC<CanvasProps> = ({
               </button>
 
               <div className="space-y-2 px-4 pb-2 pt-1">
+                <div>
+                  <div className="mb-0.5 flex items-center justify-between">
+                    <label className="text-[9px] font-medium text-[#686868]">Grid opacitet</label>
+                    <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(gridOpacity * 100)}%</span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={Math.round(gridOpacity * 100)}
+                    onChange={(event) => setGridOpacity((parseInt(event.target.value, 10) || 0) / 100)}
+                    className="kahrs-slider"
+                  />
+                </div>
                 <div>
                   <div className="mb-0.5 flex items-center justify-between">
                     <label className="text-[9px] font-medium text-[#686868]">Opacitet</label>

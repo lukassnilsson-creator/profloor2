@@ -12,6 +12,7 @@ export interface ProductInfo {
   stockStatus?: string;
   deliveryEstimate?: string;
   isCampaignPrice?: boolean;
+  imageUrl?: string;
 }
 
 export interface SavedProduct {
@@ -23,6 +24,7 @@ export interface SavedProduct {
   stockStatus?: string;
   deliveryEstimate?: string;
   isCampaignPrice?: boolean;
+  imageUrl?: string;
   lengthMm: number;
   widthMm: number;
   planksPerPackage: number;

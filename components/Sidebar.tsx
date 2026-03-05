@@ -1,35 +1,33 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { PlankSettings, Stats, ProductInfo, SavedProduct } from '../types';
+import { PlankSettings, SavedProduct } from '../types';
 
 interface SidebarProps {
   settings: PlankSettings;
   setSettings: (s: PlankSettings) => void;
-  stats: Stats;
   savedProducts: SavedProduct[];
   activeProductId: string | null;
   productTotalsById: Record<string, number>;
   onAddProduct: (product: SavedProduct) => void;
   onRemoveProduct: (productId: string) => void;
   onSelectProduct: (product: SavedProduct) => void;
-  productInfo: ProductInfo | null;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
   settings,
   setSettings,
-  stats,
   savedProducts,
   activeProductId,
   productTotalsById,
   onAddProduct,
   onRemoveProduct,
-  onSelectProduct,
-  productInfo
+  onSelectProduct
 }) => {
   const [productUrl, setProductUrl] = useState('');
   const [isFetching, setIsFetching] = useState(false);
   const [productError, setProductError] = useState<string | null>(null);
+  const [fetchElapsed, setFetchElapsed] = useState(0);
+  const fetchTimerRef = useRef<number | null>(null);
   const scrollRevealTimeoutRef = useRef<number | null>(null);
   const [isSidebarScrolling, setIsSidebarScrolling] = useState(false);
 
@@ -89,6 +87,10 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
 
     setIsFetching(true);
+    setFetchElapsed(0);
+    fetchTimerRef.current = window.setInterval(() => {
+      setFetchElapsed((s) => s + 1);
+    }, 1000);
     try {
       const res = await fetch('/api/product-lookup', {
         method: 'POST',
@@ -111,6 +113,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         stockStatus: typeof data.stockStatus === 'string' && data.stockStatus.trim() ? data.stockStatus : undefined,
         deliveryEstimate: typeof data.deliveryEstimate === 'string' && data.deliveryEstimate.trim() ? data.deliveryEstimate : undefined,
         isCampaignPrice: typeof data.isCampaignPrice === 'boolean' ? data.isCampaignPrice : undefined,
+        imageUrl: typeof data.imageUrl === 'string' && data.imageUrl.trim() ? data.imageUrl : undefined,
         lengthMm: data.lengthMm,
         widthMm: data.widthMm,
         planksPerPackage: data.planksPerPackage,
@@ -127,34 +130,16 @@ const Sidebar: React.FC<SidebarProps> = ({
       console.error("Failed to fetch product data", error);
       setProductError(error instanceof Error ? error.message : 'Kunde inte hämta produktdata automatiskt via servern.');
     } finally {
+      if (fetchTimerRef.current !== null) {
+        window.clearInterval(fetchTimerRef.current);
+        fetchTimerRef.current = null;
+      }
       setIsFetching(false);
+      setFetchElapsed(0);
     }
   };
 
   const isProductLimitReached = savedProducts.length >= 3;
-  const isWasteLow = stats.wastePercent <= 15;
-  const getStoreName = (productUrlValue: string) => {
-    try {
-      return new URL(productUrlValue).hostname.replace(/^www\./i, '') || 'Okänt';
-    } catch {
-      return 'Okänt';
-    }
-  };
-  const getProductPathPreview = (productUrlValue: string) => {
-    try {
-      const parsed = new URL(productUrlValue);
-      const trimmedPath = parsed.pathname.replace(/^\/+/, '');
-      if (!trimmedPath) {
-        return '/';
-      }
-      const previewLength = 10;
-      const preview = trimmedPath.slice(0, previewLength);
-      const hasMore = trimmedPath.length > previewLength;
-      return `/${preview}${hasMore ? '…' : ''}`;
-    } catch {
-      return '/';
-    }
-  };
   const getPricePerSquareMeter = (product: SavedProduct) => {
     const packageAreaM2 = (product.lengthMm * product.widthMm * product.planksPerPackage) / 1_000_000;
     if (!Number.isFinite(packageAreaM2) || packageAreaM2 <= 0) {
@@ -186,11 +171,15 @@ const Sidebar: React.FC<SidebarProps> = ({
     <div
       data-scrolling={isSidebarScrolling ? 'true' : 'false'}
       onScroll={handleSidebarScroll}
-      className="pf-scrollbar-on-scroll h-full min-h-0 w-full overflow-y-auto bg-white px-7 py-8"
+      className="pf-scrollbar-on-scroll h-full min-h-0 w-full overflow-y-auto bg-white"
     >
-      <div className="flex flex-col gap-8">
-        <section className="space-y-6">
-          <div className="space-y-3">
+      <div className="flex flex-col">
+        <div className="px-5 pt-5 pb-4">
+          <h2 className="text-[13px] font-semibold text-[#1a1a1a]">Valda produkter</h2>
+        </div>
+
+        <section className="space-y-0">
+          <div className="px-5 pb-4 space-y-2.5">
             <input
               type="text"
               placeholder={isProductLimitReached ? 'Max 3 produkter samtidigt' : 'Klistra in länk till golv...'}
@@ -199,29 +188,40 @@ const Sidebar: React.FC<SidebarProps> = ({
                 setProductUrl(e.target.value);
                 if (productError) setProductError(null);
               }}
-              className="w-full bg-white border border-[#E5E5E5] px-3 py-2 text-[10px] focus:outline-none focus:border-[#D2B7AC] transition"
+              className="w-full bg-white border border-[#d9d9d9] rounded-full px-4 py-2 text-[10px] focus:outline-none focus:border-[#C41230] transition"
             />
             <button
               onClick={fetchProductData}
               disabled={isFetching || !productUrl.trim() || isProductLimitReached}
-              className={`pf-action-heading pf-loading-button w-full py-3 bg-[#C9A89A] text-white font-semibold transition-colors hover:bg-[#B69181] disabled:cursor-not-allowed disabled:opacity-55 ${isFetching ? 'is-loading' : ''}`}
+              className={`pf-action-heading pf-loading-button w-full py-2.5 rounded-full bg-[#3D8B37] text-white font-semibold transition-colors hover:bg-[#2e6a2a] disabled:cursor-not-allowed disabled:opacity-55 ${isFetching ? 'is-loading' : ''}`}
             >
-              {isFetching ? 'Hämtar produktdata…' : 'Hämta Produktdata'}
+              {isFetching ? `Hämtar produktdata… ${fetchElapsed}s` : 'Hämta produkt'}
             </button>
             {productError && (
-              <p className="text-[9px] text-red-600 leading-relaxed">{productError}</p>
+              <p className="text-[9px] text-[#C41230] leading-relaxed">{productError}</p>
             )}
             {isProductLimitReached && (
-              <p className="text-[9px] text-[#8B8B8B] leading-relaxed">Max 3 produkter samtidigt</p>
+              <p className="text-[9px] text-[#767676] leading-relaxed">Max 3 produkter samtidigt</p>
             )}
           </div>
 
-          {savedProducts.length > 0 && (
-            <div className="border-t border-[#EAD8D1]">
+          {(isFetching || savedProducts.length > 0) && (
+            <div className="border-t border-[#d9d9d9]">
+              {isFetching && (
+                <div className="w-full border-b border-[#d9d9d9]">
+                  <div className="flex gap-3 px-4 py-3">
+                    <div className="pf-loading-button is-loading h-16 w-16 flex-shrink-0 rounded bg-[#ede8e3]" />
+                    <div className="flex-1 min-w-0 space-y-2 pt-1">
+                      <div className="pf-loading-button is-loading h-3 w-3/4 rounded bg-[#ede8e3]" />
+                      <div className="pf-loading-button is-loading h-2.5 w-1/2 rounded bg-[#ede8e3]" />
+                      <div className="pf-loading-button is-loading h-2.5 w-2/3 rounded bg-[#ede8e3]" />
+                    </div>
+                  </div>
+                </div>
+              )}
               {savedProducts.map((product) => {
                 const totalPrice = productTotalsById[product.id] ?? 0;
                 const isActive = activeProductId === product.id;
-                const storeName = getStoreName(product.url);
                 const pricePerSquareMeter = getPricePerSquareMeter(product);
                 const promotionLabel = getPromotionLabel(product);
                 const deliveryEstimate = product.deliveryEstimate?.trim() || 'Okänd leveranstid';
@@ -238,152 +238,123 @@ const Sidebar: React.FC<SidebarProps> = ({
                         onSelectProduct(product);
                       }
                     }}
-                    className={`w-full border-b py-2.5 text-left transition-colors cursor-pointer hover:bg-[#FAF8F7] ${
-                      isActive ? 'border-[#C1463A] bg-[#FFFDFC]' : 'border-[#EAD8D1]'
+                    className={`w-full border-b text-left transition-colors cursor-pointer ${
+                      isActive ? 'bg-[#fff8f8] border-l-2 border-l-[#C41230]' : 'border-[#d9d9d9] hover:bg-[#f9f9f9]'
                     }`}
                   >
-                    <div className="min-w-0 space-y-1.5">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex min-w-0 items-center">
-                          <p className="shrink-0 text-[8px] font-medium text-[#8B8B8B]">{storeName}</p>
-                          <a
-                            href={product.url}
-                            target="_blank"
-                            rel="noreferrer noopener"
-                            onClick={(e) => e.stopPropagation()}
-                            className="min-w-0 truncate text-[8px] text-[#6C6C6C] underline decoration-[#B9B9B9] underline-offset-2 hover:text-[#1A1A1A]"
-                            title={product.url}
+                    {/* Main card row */}
+                    <div className="px-4 pt-3 pb-0">
+                      <div className="text-[8px] mb-1.5 pl-[76px]">
+                        <a
+                          href={product.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-[#767676] hover:text-[#1a1a1a] hover:underline truncate block"
+                        >
+                          {(() => { try { return new URL(product.url).hostname.replace(/^www\./, ''); } catch { return product.url; } })()}
+                        </a>
+                      </div>
+                    </div>
+                    <div className="flex gap-3 px-4 pb-3">
+                      <img
+                        src={product.imageUrl ? `/api/image-proxy?url=${encodeURIComponent(product.imageUrl)}` : "https://placehold.co/64x64/ede8e3/9a9a9a"}
+                        alt=""
+                        className="h-16 w-16 flex-shrink-0 rounded object-cover"
+                        onError={(e) => { (e.currentTarget as HTMLImageElement).src = "https://placehold.co/64x64/ede8e3/9a9a9a"; }}
+                      />
+                      <div className="flex-1 min-w-0 space-y-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p
+                            className={`min-w-0 text-[10px] font-semibold leading-snug ${isActive ? 'text-[#1a1a1a]' : 'text-[#1a1a1a]'}`}
+                            style={{
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden'
+                            }}
                           >
-                            {getProductPathPreview(product.url)}
-                          </a>
-                        </div>
-                        <div className="flex shrink-0 items-center gap-2">
-                          {promotionLabel && (
-                            <span className="border border-[#1A1A1A] px-1.5 py-0.5 text-[8px] font-semibold text-[#1A1A1A]">
-                              {promotionLabel}
-                            </span>
-                          )}
+                            {product.name}
+                          </p>
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               onRemoveProduct(product.id);
                             }}
-                            className="inline-flex h-5 w-5 items-center justify-center text-[12px] leading-none text-[#8B8B8B] hover:text-[#1A1A1A]"
+                            className="flex-shrink-0 inline-flex h-5 w-5 items-center justify-center text-[14px] leading-none text-[#767676] hover:text-[#1a1a1a]"
                             aria-label={`Ta bort ${product.name}`}
                           >
                             ×
                           </button>
                         </div>
-                      </div>
 
-                      <p
-                        className={`min-w-0 text-[10px] font-semibold leading-snug break-words ${isActive ? 'text-[#1A1A1A]' : 'text-[#2E2E2E]'}`}
-                        style={{
-                          display: '-webkit-box',
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: 'vertical',
-                          overflow: 'hidden'
-                        }}
-                      >
-                        {product.name}
-                      </p>
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[9px]">
+                          <span className="font-medium text-[#4a4a4a]">{Number.isFinite(product.pricePerPackage) ? `${formatPrice(product.pricePerPackage, product.currency)} / pkt` : '–'}</span>
+                          <span className="text-[#767676]">
+                            {pricePerSquareMeter ? `${Math.round(pricePerSquareMeter).toLocaleString()} ${formatCurrencyLabel(product.currency)} / m²` : ''}
+                          </span>
+                          {promotionLabel && (
+                            <span className="border border-[#C41230] rounded-sm px-1 py-0.5 text-[8px] font-semibold text-[#C41230]">
+                              {promotionLabel}
+                            </span>
+                          )}
+                        </div>
 
-                      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[9px]">
-                        <span className="font-medium text-[#3F3F3F]">{formatPrice(product.pricePerPackage, product.currency)} / pkt</span>
-                        <span className="text-[#777]">
-                          {pricePerSquareMeter ? `${formatPrice(pricePerSquareMeter, product.currency)} / m²` : 'Pris/m² saknas'}
-                        </span>
-                      </div>
-
-                      <div className="flex items-center justify-between gap-3 text-[8px] leading-relaxed text-[#8B8B8B]">
-                        <span className="min-w-0 truncate">Leverans: {deliveryEstimate}</span>
-                        <span className="shrink-0 text-right font-semibold text-[#1A1A1A]">{formatPrice(totalPrice, product.currency)} total</span>
+                        <div className="flex items-center justify-between gap-2 text-[8px]">
+                          <span className="text-[#767676]">Leverans: {deliveryEstimate}</span>
+                          <span className="text-[12px] font-bold text-[#C41230]">{formatPrice(totalPrice, product.currency)}</span>
+                        </div>
                       </div>
                     </div>
+
+                    {/* Kundfavorit banner */}
+                    {product.isCampaignPrice && (
+                      <div className="flex items-center gap-1.5 bg-[#fff0f2] border-t border-[#fad0d5] px-4 py-1.5 text-[9px] font-medium text-[#C41230]">
+                        <span>★</span>
+                        <span>Kundfavorit! Över 867 köp den senaste veckan</span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           )}
 
-          <div className="space-y-8">
-            <div>
-              <label className="block text-[9px] font-medium text-[#8B8B8B] mb-4">Plankmått (mm)</label>
-              <div className="flex gap-4">
-                <div className="flex-1">
-                  <span className="text-[9px] text-[#8B8B8B] block mb-1 font-medium">Längd</span>
-                  <input 
-                    type="number" 
-                    min="0"
-                    value={settings.length === 0 ? '' : settings.length}
-                    onChange={(e) => handleChange('length', e.target.value)}
-                    className="w-full bg-[#FBFBFB] border-b border-[#E5E5E5] py-2 text-sm focus:outline-none focus:border-[#D2B7AC] transition text-[#1A1A1A]"
-                  />
-                </div>
-                <div className="flex-1">
-                  <span className="text-[9px] text-[#8B8B8B] block mb-1 font-medium">Bredd</span>
-                  <input 
-                    type="number" 
-                    min="0"
-                    value={settings.width === 0 ? '' : settings.width}
-                    onChange={(e) => handleChange('width', e.target.value)}
-                    className="w-full bg-[#FBFBFB] border-b border-[#E5E5E5] py-2 text-sm focus:outline-none focus:border-[#D2B7AC] transition text-[#1A1A1A]"
-                  />
-                </div>
+          <div className="border-t border-[#d9d9d9] px-5 py-4">
+            <label className="block text-[9px] font-medium text-[#767676] mb-3">Plankmått (mm)</label>
+            <div className="flex gap-4">
+              <div className="flex-1">
+                <span className="text-[9px] text-[#767676] block mb-1 font-medium">Längd</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={settings.length === 0 ? '' : settings.length}
+                  onChange={(e) => handleChange('length', e.target.value)}
+                  className="w-full bg-white border-b border-[#d9d9d9] py-2 text-sm focus:outline-none focus:border-[#C41230] transition text-[#1a1a1a]"
+                />
               </div>
-              <div className="mt-4">
-                <label className="block text-[9px] font-medium text-[#8B8B8B] mb-2">Antal per förpackning</label>
-                <input 
-                  type="number" 
+              <div className="flex-1">
+                <span className="text-[9px] text-[#767676] block mb-1 font-medium">Bredd</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={settings.width === 0 ? '' : settings.width}
+                  onChange={(e) => handleChange('width', e.target.value)}
+                  className="w-full bg-white border-b border-[#d9d9d9] py-2 text-sm focus:outline-none focus:border-[#C41230] transition text-[#1a1a1a]"
+                />
+              </div>
+              <div className="flex-1">
+                <span className="text-[9px] text-[#767676] block mb-1 font-medium">Antal per förpackning</span>
+                <input
+                  type="number"
                   min="1"
                   value={settings.planksPerPackage === 0 ? '' : settings.planksPerPackage}
                   onChange={(e) => handleChange('planksPerPackage', e.target.value)}
-                  className="w-full bg-[#FBFBFB] border-b border-[#E5E5E5] py-2 text-sm focus:outline-none focus:border-[#D2B7AC] transition text-[#1A1A1A]"
+                  className="w-full bg-white border-b border-[#d9d9d9] py-2 text-sm focus:outline-none focus:border-[#C41230] transition text-[#1a1a1a]"
                 />
               </div>
             </div>
-          </div>
-        </section>
-
-        <section className="pt-8 border-t border-[#F1F1F1]">
-          <div className="space-y-4">
-            <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
-              <span className="text-[11px] text-[#888] font-medium">Total Area</span>
-              <span className="text-lg font-bold text-[#1A1A1A]">{stats.area.toFixed(2)} m²</span>
-            </div>
-            <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
-              <span className="text-[11px] text-[#888] font-medium">Materialåtgång</span>
-              <span className="text-lg font-bold text-[#1A1A1A]">{stats.plankCount} st</span>
-            </div>
-            <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
-              <span className="text-[11px] text-[#888] font-medium">Förpackningar</span>
-              <span className="text-lg font-bold text-[#1A1A1A]">{stats.packageCount} st</span>
-            </div>
-            <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2">
-              <span className="text-[11px] text-[#888] font-medium">Spillprocent</span>
-              <span className={`text-lg font-bold flex items-center gap-1 ${isWasteLow ? 'text-[#2E9B4A]' : 'text-[#D2B7AC]'}`}>
-                {isWasteLow && (
-                  <svg className="w-4 h-4 text-[#2E9B4A]" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-                    <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M12 20v-6" />
-                    <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M12 14c0-3 2.3-5.5 5.2-5.9-.5 2.9-2.1 5.5-5.2 5.9Z" />
-                    <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M12 14c0-2.8-2.2-5.1-5-5.4.4 2.7 1.9 5.1 5 5.4Z" />
-                    <path strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" d="M9.5 20h5" />
-                  </svg>
-                )}
-                {stats.wastePercent.toFixed(1)}%
-              </span>
-            </div>
-            {productInfo && stats.totalPrice && (
-              <>
-                <div className="flex justify-between items-end border-b border-[#F9F9F9] pb-2 pt-4">
-                  <span className="text-[11px] text-[#1A1A1A] font-bold">Total Kostnad</span>
-                  <span className="text-xl font-black text-[#1A1A1A]">
-                    {Math.round(stats.totalPrice).toLocaleString()} {formatCurrencyLabel(productInfo.currency)}
-                  </span>
-                </div>
-              </>
-            )}
           </div>
         </section>
 

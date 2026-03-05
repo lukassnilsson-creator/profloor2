@@ -233,7 +233,8 @@ const parseProductInfo = (value: unknown): ProductInfo | null => {
     url: value.url,
     stockStatus: typeof value.stockStatus === 'string' && value.stockStatus.trim() ? value.stockStatus : undefined,
     deliveryEstimate: typeof value.deliveryEstimate === 'string' && value.deliveryEstimate.trim() ? value.deliveryEstimate : undefined,
-    isCampaignPrice: typeof value.isCampaignPrice === 'boolean' ? value.isCampaignPrice : undefined
+    isCampaignPrice: typeof value.isCampaignPrice === 'boolean' ? value.isCampaignPrice : undefined,
+    imageUrl: typeof value.imageUrl === 'string' && value.imageUrl.trim() ? value.imageUrl : undefined
   };
 };
 
@@ -294,6 +295,7 @@ const parseSavedProduct = (item: unknown): SavedProduct | null => {
     stockStatus: typeof item.stockStatus === 'string' && item.stockStatus.trim() ? item.stockStatus : undefined,
     deliveryEstimate: typeof item.deliveryEstimate === 'string' && item.deliveryEstimate.trim() ? item.deliveryEstimate : undefined,
     isCampaignPrice: typeof item.isCampaignPrice === 'boolean' ? item.isCampaignPrice : undefined,
+    imageUrl: typeof item.imageUrl === 'string' && item.imageUrl.trim() ? item.imageUrl : undefined,
     lengthMm: item.lengthMm,
     widthMm: item.widthMm,
     planksPerPackage: item.planksPerPackage,
@@ -790,7 +792,8 @@ const App: React.FC = () => {
           url: product.url,
           stockStatus: product.stockStatus,
           deliveryEstimate: product.deliveryEstimate,
-          isCampaignPrice: product.isCampaignPrice
+          isCampaignPrice: product.isCampaignPrice,
+          imageUrl: product.imageUrl
         },
         productSettingsById,
         settings: {
@@ -817,7 +820,7 @@ const App: React.FC = () => {
 
     if (savedProducts.length >= 3) return;
 
-    setSavedProducts((prev) => [...prev, product]);
+    setSavedProducts((prev) => [product, ...prev]);
     activateProduct(product);
   };
 
@@ -1017,6 +1020,14 @@ const App: React.FC = () => {
 
   const isDesignLimitReached = designState.designs.length >= MAX_DESIGNS;
 
+  const handleZoomStep = (direction: 1 | -1) => {
+    const currentPercent = Math.round(scale * 1000);
+    const nextPercent = Math.max(MIN_ZOOM_PERCENT, Math.min(MAX_ZOOM_PERCENT, currentPercent + direction * 10));
+    const nextScale = nextPercent / 1000;
+    setActiveView(nextScale, centerOffsetForPoints(points, nextScale));
+    setZoomPercentInput(String(nextPercent));
+  };
+
   const commitZoomPercent = () => {
     const parsedPercent = Number.parseFloat(zoomPercentInput.replace(',', '.'));
     if (!Number.isFinite(parsedPercent)) {
@@ -1075,12 +1086,12 @@ const App: React.FC = () => {
   };
 
   const toolsPanelContent = (
-    <div className="space-y-2 rounded border border-[#D8D3CE] bg-white p-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.09)]">
+    <div className="space-y-2 rounded border border-[#d9d9d9] bg-white p-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.09)]">
       <div className="space-y-1.5">
-        <p className="text-[9px] font-medium text-[#686868]">Optimering</p>
+        <p className="text-[9px] font-medium text-[#767676]">Optimering</p>
         <div>
           <div className="mb-0.5 flex items-center justify-between">
-            <label className="text-[9px] font-medium text-[#686868]">Skarvförskjutning</label>
+            <label className="text-[9px] font-medium text-[#767676]">Skarvförskjutning</label>
             <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(settings.minStagger)} mm</span>
           </div>
           <input
@@ -1099,7 +1110,7 @@ const App: React.FC = () => {
 
         <div>
           <div className="mb-0.5 flex items-center justify-between">
-            <label className="text-[9px] font-medium text-[#686868]">Startförskjutning hor.</label>
+            <label className="text-[9px] font-medium text-[#767676]">Startförskjutning hor.</label>
             <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(settings.startOffset)} mm</span>
           </div>
           <input
@@ -1118,7 +1129,7 @@ const App: React.FC = () => {
 
         <div>
           <div className="mb-0.5 flex items-center justify-between">
-            <label className="text-[9px] font-medium text-[#686868]">Startförskjutning vert.</label>
+            <label className="text-[9px] font-medium text-[#767676]">Startförskjutning vert.</label>
             <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(settings.startOffsetVertical)} mm</span>
           </div>
           <input
@@ -1137,7 +1148,7 @@ const App: React.FC = () => {
 
         <div>
           <div className="mb-0.5 flex items-center justify-between">
-            <label className="text-[9px] font-medium text-[#686868]">Minsta ändbit</label>
+            <label className="text-[9px] font-medium text-[#767676]">Minsta ändbit</label>
             <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(settings.minEndPiece)} mm</span>
           </div>
           <input
@@ -1155,9 +1166,9 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      <div className="space-y-1 border-t border-[#ECE7E3] pt-2">
-        <p className="text-[9px] font-medium text-[#686868]">Bedömning</p>
-        <label className="block text-[9px] font-medium text-[#666]">Mönsterkontrast</label>
+      <div className="space-y-1 border-t border-[#e8e8e8] pt-2">
+        <p className="text-[9px] font-medium text-[#767676]">Bedömning</p>
+        <label className="block text-[9px] font-medium text-[#767676]">Mönsterkontrast</label>
         <input
           type="range"
           min="0"
@@ -1169,43 +1180,43 @@ const App: React.FC = () => {
         />
       </div>
 
-      <div className="grid grid-cols-[1fr_1fr] items-center gap-2 border-t border-[#ECE7E3] pt-2">
-        <label className="text-[9px] font-medium text-[#686868]">Grid (mm)</label>
+      <div className="grid grid-cols-[1fr_1fr] items-center gap-2 border-t border-[#e8e8e8] pt-2">
+        <label className="text-[9px] font-medium text-[#767676]">Grid (mm)</label>
         <input
           type="number"
           value={gridSize}
           onChange={(event) => setGridSize(Math.max(10, parseInt(event.target.value, 10) || 10))}
-          className="pf-no-spin h-8 w-full border border-[#D8D3CE] bg-white px-2 text-right text-[10px] font-semibold text-[#171717] focus:border-[#B69181] focus:outline-none"
+          className="pf-no-spin h-8 w-full border border-[#d9d9d9] bg-white px-2 text-right text-[10px] font-semibold text-[#1a1a1a] focus:border-[#C41230] focus:outline-none"
         />
       </div>
 
-      <label className="flex items-center gap-2 text-[10px] font-medium text-[#353535]">
+      <label className="flex items-center gap-2 text-[10px] font-medium text-[#4a4a4a]">
         <input
           type="checkbox"
           checked={snapToGrid}
           onChange={() => setSnapToGrid((prev) => !prev)}
-          className="h-3.5 w-3.5 rounded border-[#CFC7C1] text-[#B69181] focus:ring-[#B69181]"
+          className="h-3.5 w-3.5 rounded border-[#d9d9d9] text-[#C41230] focus:ring-[#C41230]"
         />
         Snap
       </label>
 
-      <label className="flex items-center gap-2 text-[10px] font-medium text-[#353535]">
+      <label className="flex items-center gap-2 text-[10px] font-medium text-[#4a4a4a]">
         <input
           type="checkbox"
           checked={showEdgeLengths}
           onChange={() => setShowEdgeLengths((prev) => !prev)}
-          className="h-3.5 w-3.5 rounded border-[#CFC7C1] text-[#B69181] focus:ring-[#B69181]"
+          className="h-3.5 w-3.5 rounded border-[#d9d9d9] text-[#C41230] focus:ring-[#C41230]"
         />
         Golvmått
       </label>
 
-      <label className={`flex items-center gap-2 text-[10px] font-medium ${backgroundDrawing ? 'text-[#353535]' : 'text-[#9A9A9A]'}`}>
+      <label className={`flex items-center gap-2 text-[10px] font-medium ${backgroundDrawing ? 'text-[#4a4a4a]' : 'text-[#aaaaaa]'}`}>
         <input
           type="checkbox"
           checked={showBackgroundDrawing}
           disabled={!backgroundDrawing}
           onChange={handleToggleBackgroundDrawing}
-          className="h-3.5 w-3.5 rounded border-[#CFC7C1] text-[#B69181] focus:ring-[#B69181]"
+          className="h-3.5 w-3.5 rounded border-[#d9d9d9] text-[#C41230] focus:ring-[#C41230]"
         />
         Bakgrundsritning
       </label>
@@ -1230,7 +1241,7 @@ const App: React.FC = () => {
       <button
         type="button"
         onClick={handleReset}
-        className="flex h-8 w-full items-center justify-center gap-1.5 border border-[#E0C6BC] bg-[#FFF8F6] text-[9px] font-medium text-[#8D4F3A] transition-colors hover:bg-[#FFF1ED] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B69181]"
+        className="flex h-8 w-full items-center justify-center gap-1.5 border border-[#fad0d5] bg-[#fff5f6] text-[9px] font-medium text-[#C41230] transition-colors hover:bg-[#ffe8eb] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
         aria-label="Radera ritning"
         title="Radera ritning"
       >
@@ -1238,12 +1249,12 @@ const App: React.FC = () => {
         <span>Radera ritning</span>
       </button>
 
-      <div className="flex items-center gap-1 border-t border-[#ECE7E3] pt-2">
+      <div className="flex items-center gap-1 border-t border-[#e8e8e8] pt-2">
         <button
           type="button"
           onClick={handleUndo}
           disabled={!canUndo}
-          className="flex h-8 w-full items-center justify-center border border-[#D8D3CE] bg-white text-[#4D4D4D] transition-colors hover:text-[#171717] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B69181] disabled:cursor-not-allowed disabled:opacity-45"
+          className="flex h-8 w-full items-center justify-center border border-[#d9d9d9] bg-white text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] disabled:cursor-not-allowed disabled:opacity-45"
           title="Undo (Cmd/Ctrl+Z)"
           aria-label="Undo"
         >
@@ -1253,7 +1264,7 @@ const App: React.FC = () => {
           type="button"
           onClick={handleRedo}
           disabled={!canRedo}
-          className="flex h-8 w-full items-center justify-center border border-[#D8D3CE] bg-white text-[#4D4D4D] transition-colors hover:text-[#171717] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B69181] disabled:cursor-not-allowed disabled:opacity-45"
+          className="flex h-8 w-full items-center justify-center border border-[#d9d9d9] bg-white text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] disabled:cursor-not-allowed disabled:opacity-45"
           title="Redo (Cmd/Ctrl+Shift+Z / Ctrl+Y)"
           aria-label="Redo"
         >
@@ -1267,18 +1278,20 @@ const App: React.FC = () => {
   const topbarColumns = 'grid-cols-[var(--pf-topbar-sidebar-w)_minmax(0,1fr)_0px]';
 
   return (
-    <div className="h-screen w-full overflow-hidden bg-[#F1EFEC]">
-      <div className={`pf-app-shell relative grid h-full min-h-0 w-full ${contentColumns} grid-rows-[auto_minmax(0,1fr)] border border-[#DAD5D0] bg-white text-[#161616]`}>
-        <div className="col-[1/-1] row-[1] z-20 bg-white">
+    <div className="h-screen w-full overflow-hidden bg-[#f5f5f5]">
+      <div className={`pf-app-shell relative grid h-full min-h-0 w-full ${contentColumns} grid-rows-[auto_minmax(0,1fr)] border border-[#d9d9d9] bg-white text-[#4a4a4a]`}>
+        <div className="col-[1/-1] row-[1] z-20 bg-white border-b border-[#d9d9d9]">
           <div className={`grid h-[102px] min-w-0 ${topbarColumns} sm:h-[114px]`}>
             <div className="flex flex-col justify-center bg-white px-5 py-4 sm:px-6 sm:py-5">
-              <h1 className="serif text-[23px] font-bold leading-none tracking-tight text-[#151515]">ProFloor CAD</h1>
-              <p className="pf-label mt-2 text-[#646464]">Planera rätt, lägg snyggt, minimera spill.</p>
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-8 w-8 items-center justify-center bg-[#C41230] text-white font-bold text-[14px] shrink-0">PF</div>
+                <h1 className="text-[20px] font-semibold leading-none tracking-[-0.01em] text-[#1a1a1a]">ProFloor CAD</h1>
+              </div>
             </div>
 
-            <div className="flex min-w-0 flex-col justify-end border-b border-[#D9D4CF]">
-              <div className="pf-hide-scrollbar min-w-0 overflow-x-auto pl-0 pr-3 sm:pr-6">
-                <div className="flex min-w-max items-end gap-1 pr-2">
+            <div className="flex min-w-0 flex-col justify-end">
+              <div className="pf-hide-scrollbar min-w-0 overflow-x-auto pl-0 pr-3 sm:pr-6 h-full">
+                <div className="flex min-w-max items-stretch gap-0 pr-2 h-full">
                   {designState.designs.map((design, index) => {
                     const isActive = design.id === designState.activeDesignId;
                     const canRemove = designState.designs.length > 1;
@@ -1288,7 +1301,8 @@ const App: React.FC = () => {
                     const tabWidth = `clamp(168px, calc(${charsForWidth}ch + 6.5rem), 320px)`;
 
                     return (
-                      <div key={design.id} className="group relative flex items-end">
+                      <div key={design.id} className="group relative flex flex-col justify-end">
+                        <span className="absolute left-0 bottom-0 w-px h-[22px] bg-[#d9d9d9]" />
                         <button
                           type="button"
                           onClick={() => {
@@ -1300,10 +1314,10 @@ const App: React.FC = () => {
                             setTabContextMenu({ x: event.clientX, y: event.clientY, designId: design.id });
                           }}
                           style={{ width: tabWidth }}
-                          className={`pf-action-heading relative flex h-8 min-w-[168px] max-w-[320px] items-center rounded-t-[4px] rounded-b-none border px-4 pr-9 font-medium whitespace-nowrap transition-colors ${
+                          className={`pf-action-heading relative flex min-w-[168px] max-w-[320px] items-center border-0 bg-transparent px-4 pr-9 pb-2 pt-2 font-medium whitespace-nowrap transition-colors ${
                             isActive
-                              ? 'z-10 -mb-px border-[#D7CFC9] border-b-white bg-white text-[#171717]'
-                              : 'border-transparent bg-[#E5DEDA] text-[#6A6A6A] hover:bg-[#ECE5E1] hover:text-[#1A1A1A]'
+                              ? 'text-[#1a1a1a]'
+                              : 'text-[#767676] hover:text-[#4a4a4a]'
                           }`}
                         >
                           {isEditing ? (
@@ -1339,6 +1353,9 @@ const App: React.FC = () => {
                               {displayName}
                             </span>
                           )}
+                          {isActive && (
+                            <span className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#1a1a1a]" />
+                          )}
                         </button>
 
                         <button
@@ -1349,11 +1366,7 @@ const App: React.FC = () => {
                             event.stopPropagation();
                             handleRemoveDesign(design.id);
                           }}
-                          className={`absolute right-1.5 top-1.5 z-20 flex h-5 w-5 items-center justify-center rounded-[4px] text-[14px] leading-none transition-all ${
-                            isActive
-                              ? 'text-[#7A7A7A] hover:bg-[#EFEFEF] hover:text-[#181818]'
-                              : 'text-[#8C8C8C] opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 hover:bg-[#DCD3CF] hover:text-[#161616]'
-                          } disabled:cursor-not-allowed disabled:opacity-30`}
+                          className={`absolute right-1.5 bottom-[7px] z-20 flex h-5 w-5 items-center justify-center rounded-[4px] text-[14px] leading-none transition-all text-[#767676] hover:bg-[#f0f0f0] hover:text-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-30`}
                           aria-label={`Ta bort ${displayName}`}
                           title={canRemove ? 'Ta bort flik' : 'Minst en flik måste finnas'}
                         >
@@ -1363,13 +1376,13 @@ const App: React.FC = () => {
                     );
                   })}
 
-                  <div className="mb-1.5 ml-1 h-4 w-px bg-[#DED6D1]"></div>
+                  <div className="h-[22px] self-end w-px bg-[#d9d9d9]"></div>
 
                   <button
                     type="button"
                     onClick={handleAddDesign}
                     disabled={isDesignLimitReached}
-                    className="mb-0.5 flex h-7 w-7 items-center justify-center rounded-[4px] text-[22px] leading-none text-[#6E6E6E] transition-colors hover:bg-[#F3F1EF] hover:text-[#171717] disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex self-end h-9 w-9 items-center justify-center text-[22px] leading-none text-[#767676] transition-colors hover:bg-[#f0f0f0] hover:text-[#4a4a4a] disabled:cursor-not-allowed disabled:opacity-40"
                     title={isDesignLimitReached ? DESIGN_LIMIT_MESSAGE : 'Lägg till nytt golv'}
                     aria-label="Lägg till nytt golv"
                   >
@@ -1379,28 +1392,61 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="min-w-0 border-b border-[#D9D4CF]"></div>
+            <div className="min-w-0 border-b border-[#d9d9d9]"></div>
           </div>
         </div>
 
         <div className={`col-[1/-1] row-[2] grid min-h-0 min-w-0 ${contentColumns}`}>
-          <div className="col-[1] min-h-0 min-w-0 border-r border-[#D9D4CF] bg-white">
+          <div className="col-[1] min-h-0 min-w-0 border-r border-[#d9d9d9] bg-white">
             <Sidebar
               settings={settings}
               setSettings={handleSidebarSettingsChange}
-              stats={stats}
               savedProducts={savedProducts}
               activeProductId={activeProductId}
               productTotalsById={productTotalsById}
               onAddProduct={addProduct}
               onRemoveProduct={removeProduct}
               onSelectProduct={activateProduct}
-              productInfo={productInfo}
             />
           </div>
 
-          <main className="relative col-[2] min-h-0 min-w-0 overflow-hidden bg-[#FCFBFA]">
+          <main className="relative col-[2] min-h-0 min-w-0 overflow-hidden bg-[#f5f5f5]">
             <div className="relative h-full min-h-0 min-w-0">
+              {/* Left: zoom controls */}
+              <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleZoomStep(-1)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[18px] leading-none text-[#767676] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a]"
+                  title="Zooma ut"
+                  aria-label="Zooma ut"
+                >
+                  −
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleZoomStep(1)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[18px] leading-none text-[#767676] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a]"
+                  title="Zooma in"
+                  aria-label="Zooma in"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleZoomExtents()}
+                  className="pf-action-heading flex h-8 items-center gap-1.5 rounded-full border border-[#d9d9d9] bg-white px-3 text-[#767676] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
+                  title="Zooma till extents"
+                  aria-label="Zooma till extents"
+                >
+                  <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M4 10.5l8-6 8 6M6.5 9.75V19.5a1 1 0 001 1h9a1 1 0 001-1V9.75M10 20v-5a1 1 0 011-1h2a1 1 0 011 1v5" />
+                  </svg>
+                  <span className="whitespace-nowrap font-medium">Visa hela</span>
+                </button>
+              </div>
+
+              {/* Right: import, save, menu */}
               <div className="absolute right-3 top-3 z-30 flex items-center gap-2">
                 <input
                   ref={importInputRef}
@@ -1438,10 +1484,10 @@ const App: React.FC = () => {
                     setIsImportDropActive(false);
                     handleCanvasImportFile(event.dataTransfer.files?.[0]);
                   }}
-                  className={`pf-action-heading flex h-8 items-center justify-center gap-1.5 border px-2.5 font-medium text-[#4D4D4D] transition-colors hover:text-[#171717] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B69181] ${
+                  className={`pf-action-heading flex h-8 items-center justify-center gap-1.5 rounded-full border px-3 font-medium text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] ${
                     isImportDropActive
-                      ? 'border-[#B69181] bg-[#F7F4F1]'
-                      : 'border-[#D8D3CE] bg-white'
+                      ? 'border-[#C41230] bg-[#fff5f6]'
+                      : 'border-[#d9d9d9] bg-white'
                   }`}
                   aria-label="Importera ritning"
                   title="Importera ritning"
@@ -1453,8 +1499,21 @@ const App: React.FC = () => {
                 </button>
                 <button
                   type="button"
+                  title="Spara (ej implementerat)"
+                  aria-label="Spara"
+                  className="pf-action-heading flex h-8 items-center justify-center gap-1.5 rounded-full border border-[#d9d9d9] bg-white px-3 font-medium text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                    <polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="17 21 17 13 7 13 7 21" />
+                    <polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="7 3 7 8 15 8" />
+                  </svg>
+                  <span className="whitespace-nowrap">Spara</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setIsToolsPanelOpen((prev) => !prev)}
-                  className="flex h-8 w-8 items-center justify-center border border-[#D8D3CE] bg-white text-[#4D4D4D] transition-colors hover:text-[#171717] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B69181]"
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
                   aria-label="Visa canvasverktyg"
                   title="Canvasverktyg"
                 >
@@ -1463,46 +1522,11 @@ const App: React.FC = () => {
               </div>
 
               {importLaunchError && (
-                <div className="absolute right-3 top-[3.35rem] z-30 max-w-[280px] border border-[#E0C6BC] bg-[#FFF8F6] px-2.5 py-1.5 text-[10px] font-semibold text-[#8D4F3A]">
+                <div className="absolute right-3 top-[3.35rem] z-30 max-w-[280px] border border-[#fad0d5] bg-[#fff5f6] px-2.5 py-1.5 text-[10px] font-semibold text-[#C41230]">
                   {importLaunchError}
                 </div>
               )}
 
-                <div className="absolute bottom-3 left-3 z-30 flex h-8 items-center gap-1 rounded border border-[#D8D3CE] bg-white px-1.5 shadow-[0_4px_12px_rgba(0,0,0,0.08)]">
-                <button
-                  type="button"
-                  onClick={() => handleZoomExtents()}
-                  className="flex h-6 w-6 items-center justify-center text-[#6A6A6A] transition-colors hover:text-[#171717] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#B69181]"
-                  title="Zooma till extents"
-                  aria-label="Zooma till extents"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M4 10.5l8-6 8 6M6.5 9.75V19.5a1 1 0 001 1h9a1 1 0 001-1V9.75M10 20v-5a1 1 0 011-1h2a1 1 0 011 1v5" />
-                  </svg>
-                </button>
-                <div className="flex h-6 w-[60px] items-center justify-end gap-0.5 pr-1">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    pattern="[0-9]*"
-                    value={zoomPercentInput}
-                    onChange={(event) => setZoomPercentInput(event.target.value.replace(/[^0-9.,]/g, ''))}
-                    onBlur={commitZoomPercent}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        event.preventDefault();
-                        commitZoomPercent();
-                      } else if (event.key === 'Escape') {
-                        event.preventDefault();
-                        setZoomPercentInput(String(Math.round(scale * 1000)));
-                      }
-                    }}
-                    className="h-full w-10 bg-transparent text-right text-sm font-normal leading-none text-[#1A1A1A] focus:outline-none"
-                    aria-label="Skala i procent"
-                  />
-                  <span className="pointer-events-none text-sm font-normal leading-none text-[#171717]">%</span>
-                </div>
-              </div>
               <Canvas
                 points={points}
                 setPoints={setActivePoints}
@@ -1528,6 +1552,8 @@ const App: React.FC = () => {
                 onRemoveBackgroundDrawing={handleRemoveBackgroundDrawing}
                 onZoomExtents={handleZoomExtents}
                 showFloatingToolPanel={false}
+                stats={stats}
+                productInfo={productInfo}
               />
 
               {isToolsPanelOpen && (
@@ -1543,13 +1569,13 @@ const App: React.FC = () => {
 
         {tabContextMenu && (
           <div
-            className="fixed z-50 min-w-[170px] border border-[#D8D3CE] bg-white py-1 shadow-2xl"
+            className="fixed z-50 min-w-[170px] border border-[#d9d9d9] bg-white py-1 shadow-2xl"
             style={{ left: tabContextMenu.x, top: tabContextMenu.y }}
           >
             <button
               type="button"
               onClick={handleTabContextRename}
-              className="pf-action-heading w-full px-4 py-2 text-left font-medium text-[#1A1A1A] hover:bg-[#F4F1EE]"
+              className="pf-action-heading w-full px-4 py-2 text-left font-medium text-[#4a4a4a] hover:bg-[#f5f5f5]"
             >
               Byt namn
             </button>

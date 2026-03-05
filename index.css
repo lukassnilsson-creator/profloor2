@@ -3,45 +3,35 @@
 @tailwind utilities;
 
 :root {
-  --pf-bg: #f3f1ee;
+  --pf-bg: #f5f5f5;
   --pf-surface: #ffffff;
-  --pf-border: #d9d4cf;
-  --pf-text: #151515;
-  --pf-muted: #66635f;
-  --pf-accent: #c9a89a;
-  --pf-accent-strong: #b69181;
+  --pf-border: #d9d9d9;
+  --pf-text: #4a4a4a;
+  --pf-muted: #767676;
+  --pf-accent: #C41230;
+  --pf-accent-strong: #9e0e24;
+  --pf-green: #3D8B37;
+  --pf-green-dark: #2e6a2a;
 }
 
 @layer base {
   body {
     @apply font-sans overflow-hidden;
-    font-family: 'Public Sans', sans-serif;
+    font-family: 'IBM Plex Sans', sans-serif;
     background: var(--pf-bg);
     color: var(--pf-text);
   }
 
   #root {
-    font-family: 'Public Sans', sans-serif;
+    font-family: 'IBM Plex Sans', sans-serif;
   }
 
-  :where(button, input, select, textarea) {
-    border-radius: 4px;
-  }
-
-  :where([class*="border"]):not([class*="border-t"]):not([class*="border-b"]):not([class*="border-l"]):not([class*="border-r"]) {
-    border-radius: 4px;
-  }
 }
 
 @layer components {
   .pf-app-shell {
-    --pf-sidebar-w: 250px;
+    --pf-sidebar-w: 400px;
     --pf-topbar-sidebar-w: calc(var(--pf-sidebar-w) - 1px);
-  }
-  @media (min-width: 640px) {
-    .pf-app-shell {
-      --pf-sidebar-w: 280px;
-    }
   }
   .kahrs-panel {
     @apply bg-white border shadow-[0_4px_20px_rgba(0,0,0,0.03)];
@@ -68,7 +58,7 @@
   .kahrs-slider {
     -webkit-appearance: none;
     @apply relative my-[10px] h-[2px] w-full outline-none;
-    background: #dccbc3;
+    background: #d9d9d9;
   }
   .kahrs-slider::-webkit-slider-thumb {
     -webkit-appearance: none;
@@ -134,12 +124,12 @@
   .pf-scrollbar-on-scroll[data-scrolling='true'],
   .pf-scrollbar-on-scroll:hover,
   .pf-scrollbar-on-scroll:focus-within {
-    scrollbar-color: #cfcac5 transparent;
+    scrollbar-color: #c0c0c0 transparent;
   }
   .pf-scrollbar-on-scroll[data-scrolling='true']::-webkit-scrollbar-thumb,
   .pf-scrollbar-on-scroll:hover::-webkit-scrollbar-thumb,
   .pf-scrollbar-on-scroll:focus-within::-webkit-scrollbar-thumb {
-    background: #cfcac5;
+    background: #c0c0c0;
   }
 }
 
@@ -157,9 +147,9 @@
   width: 4px;
 }
 ::-webkit-scrollbar-track {
-  background: #f2f0ed;
+  background: #f0f0f0;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cfcac5;
+  background: #c0c0c0;
   border-radius: 99px;
 }
