@@ -148,6 +148,14 @@ export const getDistanceToSegment = (p: Point, a: Point, b: Point): number => {
   });
 };
 
+export const projectPointOntoSegment = (p: Point, a: Point, b: Point): Point => {
+  const l2 = Math.pow(getDistance(a, b), 2);
+  if (l2 === 0) return { ...a };
+  let t = ((p.x - a.x) * (b.x - a.x) + (p.y - a.y) * (b.y - a.y)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: a.x + t * (b.x - a.x), y: a.y + t * (b.y - a.y) };
+};
+
 export const findClosestEdge = (p: Point, points: Point[]): { index: number, distance: number } => {
   let minDistance = Infinity;
   let minIndex = -1;
@@ -161,6 +169,96 @@ export const findClosestEdge = (p: Point, points: Point[]): { index: number, dis
     }
   }
   return { index: minIndex, distance: minDistance };
+};
+
+export const computeEdgeNormal = (points: Point[], edgeIdx: number): Point => {
+  const n = points.length;
+  const A = points[edgeIdx];
+  const B = points[(edgeIdx + 1) % n];
+  const dx = B.x - A.x;
+  const dy = B.y - A.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 0.0001) return { x: 0, y: 1 };
+  return { x: -dy / len, y: dx / len };
+};
+
+/**
+ * Translates edge i purely along its own normal by `amount`.
+ * The dragged edge keeps its exact original length and angle.
+ * Each adjacent edge chain propagates the displacement while maintaining its original direction
+ * (only scaling in length). A single "free" edge opposite the dragged edge absorbs any residual.
+ */
+export const translateEdgeInPolygon = (points: Point[], edgeIdx: number, amount: number): Point[] => {
+  const n = points.length;
+  if (n < 3) return points;
+  const A = points[edgeIdx];
+  const B = points[(edgeIdx + 1) % n];
+  const dx = B.x - A.x;
+  const dy = B.y - A.y;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len < 0.0001) return points;
+  const normal = { x: -dy / len, y: dx / len };
+  const delta = { x: amount * normal.x, y: amount * normal.y };
+
+  const newPoints = [...points];
+  newPoints[edgeIdx] = { x: A.x + delta.x, y: A.y + delta.y };
+  newPoints[(edgeIdx + 1) % n] = { x: B.x + delta.x, y: B.y + delta.y };
+
+  const backwardSteps = Math.floor((n - 2) / 2);
+  const forwardSteps = n - 2 - backwardSteps;
+
+  // Forward chain: from p[edgeIdx+2] going forward — run first to get fwdEndDelta
+  let cur = { ...delta };
+  for (let step = 1; step <= forwardSteps; step++) {
+    const j = (edgeIdx + 1 + step) % n;
+    const jPrev = (j - 1 + n) % n;
+    const ex = points[j].x - points[jPrev].x;
+    const ey = points[j].y - points[jPrev].y;
+    const elen = Math.sqrt(ex * ex + ey * ey);
+    if (elen < 0.0001) continue;
+    const along = (cur.x * ex + cur.y * ey) / elen;
+    cur = { x: cur.x - along * ex / elen, y: cur.y - along * ey / elen };
+    newPoints[j] = { x: points[j].x + cur.x, y: points[j].y + cur.y };
+  }
+  const fwdEndDelta = { ...cur };
+
+  // Backward chain: from p[edgeIdx-1] going backward, using 2x2 solve per vertex
+  cur = { ...delta };
+  for (let step = 1; step <= backwardSteps; step++) {
+    const j = ((edgeIdx - step) + n) % n;
+    const jNext = (j + 1) % n;
+    const jPrev = (j - 1 + n) % n;
+
+    // n_right: normal of edge (j → j+1)
+    const erx = points[jNext].x - points[j].x;
+    const ery = points[jNext].y - points[j].y;
+    const erLen = Math.sqrt(erx * erx + ery * ery);
+    if (erLen < 0.0001) continue;
+    const nrx = -ery / erLen, nry = erx / erLen;
+
+    // n_left: normal of edge (j-1 → j)
+    const elx = points[j].x - points[jPrev].x;
+    const ely = points[j].y - points[jPrev].y;
+    const elLen = Math.sqrt(elx * elx + ely * ely);
+    if (elLen < 0.0001) continue;
+    const nlx = -ely / elLen, nly = elx / elLen;
+
+    // rhs: [known_right · n_right, known_left · n_left]
+    // known_right = cur (delta of j+1), known_left = fwdEndDelta (forward chain endpoint)
+    const r1 = cur.x * nrx + cur.y * nry;
+    const r2 = fwdEndDelta.x * nlx + fwdEndDelta.y * nly;
+
+    // Solve [[nrx, nry], [nlx, nly]] * [dx, dy] = [r1, r2]
+    const det = nrx * nly - nry * nlx;
+    if (Math.abs(det) < 0.0001) continue;
+    cur = {
+      x: (r1 * nly - r2 * nry) / det,
+      y: (nrx * r2 - nlx * r1) / det,
+    };
+    newPoints[j] = { x: points[j].x + cur.x, y: points[j].y + cur.y };
+  }
+
+  return newPoints;
 };
 
 /**

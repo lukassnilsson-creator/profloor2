@@ -1,7 +1,7 @@
 import React, { useRef, useEffect, useState, useMemo, useCallback } from 'react';
 import { Point, PlankSettings, PlankInstance, WastePiece, ImportedDrawingBackground, Stats, ProductInfo } from '../types';
 import { findClosestEdge, getDistance, movePointByLength, isPointInPolygon } from '../geometry';
-import { getHoverPointIndex } from '../pointEditing';
+import { getHoverPointIndex, getClosestEdgeInsertIndex, addOrInsertPoint, forceSnapPointTo90 } from '../pointEditing';
 import { usePlanEditor } from '../hooks/usePlanEditor';
 
 interface CanvasProps {
@@ -40,13 +40,21 @@ interface PointContextMenu {
   pointIdx: number;
 }
 
+interface EdgeContextMenu {
+  kind: 'edge';
+  x: number;
+  y: number;
+  edgeIdx: number;
+  cursor: { x: number; y: number };
+}
+
 interface CanvasContextMenu {
   kind: 'canvas';
   x: number;
   y: number;
 }
 
-type ContextMenu = PointContextMenu | CanvasContextMenu;
+type ContextMenu = PointContextMenu | EdgeContextMenu | CanvasContextMenu;
 
 interface GestureLikeEvent extends Event {
   scale?: number;
@@ -126,7 +134,7 @@ const Canvas: React.FC<CanvasProps> = ({
   const [lastPanPos, setLastPanPos] = useState({ x: 0, y: 0 });
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
   const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
-  const [gridOpacity, setGridOpacity] = useState(0.58);
+  const [gridOpacity, setGridOpacity] = useState(0.4); // Admin: expose setGridOpacity via admin panel to let users adjust
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [toolPanelOffset, setToolPanelOffset] = useState(loadToolPanelOffset);
 
@@ -226,6 +234,7 @@ const Canvas: React.FC<CanvasProps> = ({
     hoverIdx,
     closestEdgeIdx,
     draggingIdx,
+    draggingEdgeIdx,
     handlePrimaryDown,
     handlePointerMove,
     handlePointerUp,
@@ -316,9 +325,10 @@ const Canvas: React.FC<CanvasProps> = ({
       bisector.x = -bisector.x;
       bisector.y = -bisector.y;
     }
+    const offsetPx = 28 / scale; // constant pixel distance from the vertex
     return {
       angle: (angleRad * 180) / Math.PI,
-      labelPos: { x: point.x + bisector.x * 35, y: point.y + bisector.y * 35 }
+      labelPos: { x: point.x + bisector.x * offsetPx, y: point.y + bisector.y * offsetPx }
     };
   };
 
@@ -334,32 +344,23 @@ const Canvas: React.FC<CanvasProps> = ({
     const s2 = { x: p2.x * scale + centerX, y: p2.y * scale + centerY };
     const edgeDx = s2.x - s1.x;
     const edgeDy = s2.y - s1.y;
-    const edgeLength = Math.hypot(edgeDx, edgeDy) || 1;
+    const edgeLength = Math.hypot(edgeDx, edgeDy);
+
+    // Hide when edge is too short to fit the label without crowding
+    if (edgeLength < 68) return null;
+
     const nx = -edgeDy / edgeLength;
     const ny = edgeDx / edgeLength;
     const midX = (s1.x + s2.x) / 2;
     const midY = (s1.y + s2.y) / 2;
 
-    const pointScreens = points.map((point) => ({
-      x: point.x * scale + centerX,
-      y: point.y * scale + centerY
-    }));
+    // Place label on the outside of the polygon (side away from centroid)
+    const centX = points.reduce((sum, p) => sum + p.x * scale + centerX, 0) / points.length;
+    const centY = points.reduce((sum, p) => sum + p.y * scale + centerY, 0) / points.length;
+    const dot = nx * (centX - midX) + ny * (centY - midY);
+    const offsetPx = dot > 0 ? -32 : 32;
 
-    const candidates = [28, -28, 44, -44].map((offsetPx) => ({
-      left: midX + nx * offsetPx,
-      top: midY + ny * offsetPx
-    }));
-
-    const minHandleDistance = 24;
-    for (const candidate of candidates) {
-      const collidesWithHandle = pointScreens.some((screenPoint) => {
-        const dx = candidate.left - screenPoint.x;
-        const dy = candidate.top - screenPoint.y;
-        return Math.hypot(dx, dy) < minHandleDistance;
-      });
-      if (!collidesWithHandle) return candidate;
-    }
-    return candidates[0];
+    return { left: midX + nx * offsetPx, top: midY + ny * offsetPx };
   }, [offset.x, offset.y, points, scale]);
 
   const draw = useCallback(() => {
@@ -743,11 +744,11 @@ const Canvas: React.FC<CanvasProps> = ({
           return;
         }
 
-        if (points.length >= 2) {
+        if (points.length >= 3) {
           const safeScale = Math.max(currentScale, 0.0001);
-          const closestEdge = findClosestEdge(cursor, points);
-          if (closestEdge.distance < (EDGE_HIT_TOLERANCE_PX / safeScale)) {
-            setContextMenu(null);
+          const edgeIdx = getClosestEdgeInsertIndex(points, cursor, safeScale, null);
+          if (edgeIdx !== null) {
+            setContextMenu({ kind: 'edge', x: event.clientX, y: event.clientY, edgeIdx, cursor });
             return;
           }
         }
@@ -757,12 +758,12 @@ const Canvas: React.FC<CanvasProps> = ({
       style={{
         cursor: isPanning
           ? 'grabbing'
-          : draggingIdx !== null
+          : draggingIdx !== null || draggingEdgeIdx !== null
             ? 'grabbing'
             : hoverIdx !== null || hoverWastePieceIdx !== null
               ? 'pointer'
               : closestEdgeIdx !== null
-                ? 'copy'
+                ? 'pointer'
                 : 'crosshair'
       }}
     >
@@ -773,6 +774,12 @@ const Canvas: React.FC<CanvasProps> = ({
         onMouseUp={() => {
           handlePointerUp();
           setIsPanning(false);
+        }}
+        onDoubleClick={() => {
+          if (hoverIdx !== null) {
+            const snapped = forceSnapPointTo90(points, hoverIdx);
+            if (snapped !== points) setPoints(snapped);
+          }
         }}
         onMouseLeave={() => {
           handlePointerUp();
@@ -790,18 +797,22 @@ const Canvas: React.FC<CanvasProps> = ({
             className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2"
             style={{ left: labelPosition.left, top: labelPosition.top }}
           >
-            <input
-              type="number"
-              value={Math.round(edgeLengths[index])}
-              onChange={(event) => {
-                const value = parseFloat(event.target.value);
-                if (value > 0) {
-                  onRequestHistorySnapshot();
-                  setPoints(movePointByLength(points, index, value));
-                }
-              }}
-              className="h-7 w-16 border border-[#D9D4CF] bg-white text-center text-[10px] font-semibold text-[#1A1A1A] shadow-[0_2px_8px_rgba(0,0,0,0.08)] focus:border-[#B69181] focus:outline-none"
-            />
+            <div className="flex items-baseline gap-px">
+              <input
+                type="number"
+                value={Math.round(edgeLengths[index])}
+                onChange={(event) => {
+                  const value = parseFloat(event.target.value);
+                  if (value > 0) {
+                    onRequestHistorySnapshot();
+                    setPoints(movePointByLength(points, index, value));
+                  }
+                }}
+                className="h-6 w-10 border-none bg-transparent pr-0 text-right text-[10px] font-semibold text-[#1A1A1A] outline-none focus:bg-white/80 focus:rounded-sm focus:outline focus:outline-1 focus:outline-[#B69181] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                style={{ textShadow: '0 0 4px rgba(255,255,255,0.95), 0 0 8px rgba(255,255,255,0.7)' }}
+              />
+              <span className="select-none text-[9px] font-medium text-[#1A1A1A]" style={{ textShadow: '0 0 4px rgba(255,255,255,0.95), 0 0 8px rgba(255,255,255,0.7)' }}>mm</span>
+            </div>
           </div>
         );
       })}
@@ -873,7 +884,21 @@ const Canvas: React.FC<CanvasProps> = ({
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(event) => event.stopPropagation()}
         >
-          {contextMenu.kind === 'point' ? (
+          {contextMenu.kind === 'edge' ? (
+            <button
+              onClick={() => {
+                const nextPoints = addOrInsertPoint(points, contextMenu.cursor, contextMenu.edgeIdx, snapToGrid, gridSize);
+                if (nextPoints) {
+                  onRequestHistorySnapshot();
+                  setPoints(nextPoints);
+                }
+                setContextMenu(null);
+              }}
+              className="pf-action-heading w-full px-4 py-2 text-left font-medium hover:bg-[#F6F2EF]"
+            >
+              Lägg till punkt
+            </button>
+          ) : contextMenu.kind === 'point' ? (
             <>
               <button
                 onClick={() => {
@@ -898,60 +923,44 @@ const Canvas: React.FC<CanvasProps> = ({
             </>
           ) : (
             <>
-              <button
-                type="button"
-                onClick={() => {
-                  onToggleSnapToGrid();
-                  setContextMenu(null);
-                }}
-                className="pf-action-heading flex w-full items-center gap-2 px-4 py-2 text-left font-medium text-[#1A1A1A] hover:bg-[#F6F2EF]"
-              >
-                <span className={`inline-flex h-3.5 w-3.5 items-center justify-center border text-[9px] ${snapToGrid ? 'border-[#B69181] bg-[#F6F0EC] text-[#8F6655]' : 'border-[#D9D4CF] bg-white text-transparent'}`}>✓</span>
-                <span>Snap</span>
-              </button>
+              <div className="grid grid-cols-2 gap-2 px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onToggleEdgeLengths();
+                    setContextMenu(null);
+                  }}
+                  className={`pf-action-heading rounded border px-2 py-1.5 text-center font-medium transition-colors ${
+                    showEdgeLengths
+                      ? 'border-[#B69181] bg-[#F6F0EC] text-[#1A1A1A]'
+                      : 'border-[#D9D4CF] bg-white text-[#666]'
+                  }`}
+                >
+                  {showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
+                </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  onToggleEdgeLengths();
-                  setContextMenu(null);
-                }}
-                className="pf-action-heading flex w-full items-center gap-2 px-4 py-2 text-left font-medium text-[#1A1A1A] hover:bg-[#F6F2EF]"
-              >
-                <span className={`inline-flex h-3.5 w-3.5 items-center justify-center border text-[9px] ${showEdgeLengths ? 'border-[#B69181] bg-[#F6F0EC] text-[#8F6655]' : 'border-[#D9D4CF] bg-white text-transparent'}`}>✓</span>
-                <span>Golvmått</span>
-              </button>
-
-              <button
-                type="button"
-                disabled={!backgroundDrawing}
-                onClick={() => {
-                  if (!backgroundDrawing) return;
-                  onToggleBackgroundDrawing();
-                  setContextMenu(null);
-                }}
-                className={`pf-action-heading flex w-full items-center gap-2 px-4 py-2 text-left font-medium ${backgroundDrawing ? 'text-[#1A1A1A] hover:bg-[#F6F2EF]' : 'cursor-not-allowed text-[#A5A5A5]'}`}
-              >
-                <span className={`inline-flex h-3.5 w-3.5 items-center justify-center border text-[9px] ${backgroundDrawing && showBackgroundDrawing ? 'border-[#B69181] bg-[#F6F0EC] text-[#8F6655]' : 'border-[#D9D4CF] bg-white text-transparent'}`}>✓</span>
-                <span>Bakgrundsritning</span>
-              </button>
+                <button
+                  type="button"
+                  disabled={!backgroundDrawing}
+                  onClick={() => {
+                    if (!backgroundDrawing) return;
+                    onToggleBackgroundDrawing();
+                    setContextMenu(null);
+                  }}
+                  className={`pf-action-heading rounded border px-2 py-1.5 text-center font-medium transition-colors ${
+                    backgroundDrawing && showBackgroundDrawing
+                      ? 'border-[#B69181] bg-[#F6F0EC] text-[#1A1A1A]'
+                      : backgroundDrawing
+                        ? 'border-[#D9D4CF] bg-white text-[#666]'
+                        : 'cursor-not-allowed border-[#D9D4CF] bg-white text-[#B0B0B0]'
+                  }`}
+                >
+                  {backgroundDrawing && showBackgroundDrawing ? 'Dölj bakgrund' : 'Visa bakgrund'}
+                </button>
+              </div>
 
               <div className="space-y-2 px-4 pb-2 pt-1">
-                <div>
-                  <div className="mb-0.5 flex items-center justify-between">
-                    <label className="text-[9px] font-medium text-[#686868]">Grid opacitet</label>
-                    <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(gridOpacity * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={Math.round(gridOpacity * 100)}
-                    onChange={(event) => setGridOpacity((parseInt(event.target.value, 10) || 0) / 100)}
-                    className="kahrs-slider"
-                  />
-                </div>
+                {/* Admin: grid opacity slider removed from UI — use setGridOpacity(0–1) to restore */}
                 <div>
                   <div className="mb-0.5 flex items-center justify-between">
                     <label className="text-[9px] font-medium text-[#686868]">Opacitet</label>
@@ -1042,17 +1051,6 @@ const Canvas: React.FC<CanvasProps> = ({
               </div>
 
               <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={onToggleSnapToGrid}
-                  className={`pf-action-heading rounded border px-2 py-1.5 font-medium transition-colors ${
-                    snapToGrid
-                      ? 'border-[#B69181] bg-[#F6F0EC] text-[#1A1A1A]'
-                      : 'border-[#D9D4CF] bg-white text-[#666]'
-                  }`}
-                >
-                  Magnet
-                </button>
                 <button
                   type="button"
                   onClick={onToggleEdgeLengths}

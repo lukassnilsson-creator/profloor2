@@ -90,10 +90,17 @@ const getProductDefaults = (product: SavedProduct): ProductDesignSettings => ({
   minEndPiece: product.minEndPiece
 });
 
+const DEFAULT_FLOOR_POINTS: Point[] = [
+  { x: -2000, y: -1500 },
+  { x: 2000, y: -1500 },
+  { x: 2000, y: 1500 },
+  { x: -2000, y: 1500 }
+];
+
 const createDefaultDesign = (name: string): FloorDesign => ({
   id: createDesignId(),
   name,
-  points: [],
+  points: DEFAULT_FLOOR_POINTS.map((p) => ({ ...p })),
   settings: { ...INITIAL_SETTINGS },
   productSettingsById: {},
   activeProductId: null,
@@ -1190,15 +1197,6 @@ const App: React.FC = () => {
         />
       </div>
 
-      <label className="flex items-center gap-2 text-[10px] font-medium text-[#4a4a4a]">
-        <input
-          type="checkbox"
-          checked={snapToGrid}
-          onChange={() => setSnapToGrid((prev) => !prev)}
-          className="h-3.5 w-3.5 rounded border-[#d9d9d9] text-[#C41230] focus:ring-[#C41230]"
-        />
-        Snap
-      </label>
 
       <label className="flex items-center gap-2 text-[10px] font-medium text-[#4a4a4a]">
         <input
