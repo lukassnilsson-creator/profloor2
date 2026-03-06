@@ -39,6 +39,7 @@ export interface ProductDesignSettings {
   startOffset: number;
   startOffsetVertical: number;
   minEndPiece: number;
+  layoutRotated: boolean;
 }
 
 export interface PlankSettings {
@@ -52,6 +53,7 @@ export interface PlankSettings {
   planksPerPackage: number; // pieces
   visualContrast: number; // 0 to 1
   originPointIdx: number; // Index of the point to start the layout from
+  layoutRotated: boolean; // Rotate laying pattern 90°
 }
 
 export interface FloorDesign {

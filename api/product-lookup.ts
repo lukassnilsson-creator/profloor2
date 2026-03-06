@@ -17,10 +17,16 @@ interface ErrorLike {
   message?: unknown;
 }
 
+interface JsonLdPriceSpec {
+  price?: number | string;
+  priceCurrency?: string;
+}
+
 interface JsonLdOffer {
   price?: number | string;
   priceCurrency?: string;
   availability?: string;
+  priceSpecification?: JsonLdPriceSpec | JsonLdPriceSpec[];
 }
 
 interface JsonLdProduct {
@@ -119,14 +125,21 @@ const extractRelevantText = (html: string): string => {
   // Strip tags, collapse whitespace
   text = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // Try to anchor around first mm mention to find the spec section
+  // Always include the page start (product name + price are typically near the top).
+  // Also include the area around the first mm mention (where specs live).
+  // On many e-commerce sites the price section is hundreds of chars before the spec table,
+  // so a pure mm-anchor window misses it.
+  const pageStart = text.slice(0, 2500);
+
   const mmIdx = text.search(/\d+\s*mm/i);
-  if (mmIdx > 0) {
-    const start = Math.max(0, mmIdx - 1500);
-    const end = Math.min(text.length, mmIdx + 3000);
-    return text.slice(start, end);
+  if (mmIdx > 2500) {
+    // Spec section is further down — append a window around it
+    const specStart = Math.max(2500, mmIdx - 500);
+    const specEnd = Math.min(text.length, mmIdx + 2000);
+    return pageStart + ' ' + text.slice(specStart, specEnd);
   }
 
+  // mm is within the first 2500 chars — page start already covers it
   return text.slice(0, 5000);
 };
 
@@ -245,8 +258,17 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         : null;
 
       const nameFromLd = typeof jsonLd?.name === 'string' ? decodeHtml(jsonLd.name) : null;
-      const priceFromLd = offer?.price != null ? parsePrice(offer.price) : null;
-      const currencyFromLd = typeof offer?.priceCurrency === 'string' ? offer.priceCurrency : null;
+
+      // Try offer.price, then fall back to offer.priceSpecification.price
+      const priceSpec = offer?.priceSpecification
+        ? Array.isArray(offer.priceSpecification) ? offer.priceSpecification[0] : offer.priceSpecification
+        : null;
+      const priceFromLd = offer?.price != null
+        ? parsePrice(offer.price)
+        : priceSpec?.price != null ? parsePrice(priceSpec.price) : null;
+      const currencyFromLd = typeof offer?.priceCurrency === 'string'
+        ? offer.priceCurrency
+        : typeof priceSpec?.priceCurrency === 'string' ? priceSpec.priceCurrency : null;
       const stockFromLd = typeof offer?.availability === 'string' ? mapAvailability(offer.availability) : null;
 
       try {

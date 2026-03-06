@@ -64,7 +64,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     const ai = new GoogleGenAI({ apiKey });
 
     const requestPayload = {
-      model: 'gemini-3-flash-preview',
+      model: 'gemini-2.5-flash',
       contents: [
         {
           parts: [

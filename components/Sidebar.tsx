@@ -1,16 +1,22 @@
 
 import React, { useEffect, useRef, useState } from 'react';
-import { PlankSettings, SavedProduct } from '../types';
+import { PlankSettings, SavedProduct, Stats } from '../types';
 
 interface SidebarProps {
   settings: PlankSettings;
   setSettings: (s: PlankSettings) => void;
   savedProducts: SavedProduct[];
   activeProductId: string | null;
-  productTotalsById: Record<string, number>;
+  productStatsById: Record<string, Stats>;
+  isManualActive: boolean;
+  manualFloorSettings: { length: number; width: number; planksPerPackage: number; pricePerPackage: number };
+  manualStats: Stats;
+  onActivateManual: () => void;
+  onManualFloorSettingsChange: (next: { length: number; width: number; planksPerPackage: number; pricePerPackage: number }) => void;
   onAddProduct: (product: SavedProduct) => void;
   onRemoveProduct: (productId: string) => void;
   onSelectProduct: (product: SavedProduct) => void;
+  onOptimize: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -18,10 +24,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   setSettings,
   savedProducts,
   activeProductId,
-  productTotalsById,
+  productStatsById,
+  isManualActive,
+  manualFloorSettings,
+  manualStats,
+  onActivateManual,
+  onManualFloorSettingsChange,
   onAddProduct,
   onRemoveProduct,
-  onSelectProduct
+  onSelectProduct,
+  onOptimize
 }) => {
   const [productUrl, setProductUrl] = useState('');
   const [isFetching, setIsFetching] = useState(false);
@@ -63,7 +75,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const fetchProductData = async () => {
     const rawUrl = productUrl.trim();
-    if (!rawUrl || savedProducts.length >= 3) return;
+    if (!rawUrl || savedProducts.length >= 5) return;
 
     setProductError(null);
     let normalizedUrl = rawUrl;
@@ -139,7 +151,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const isProductLimitReached = savedProducts.length >= 3;
+  const isProductLimitReached = savedProducts.length >= 5;
   const getPricePerSquareMeter = (product: SavedProduct) => {
     const packageAreaM2 = (product.lengthMm * product.widthMm * product.planksPerPackage) / 1_000_000;
     if (!Number.isFinite(packageAreaM2) || packageAreaM2 <= 0) {
@@ -168,42 +180,40 @@ const Sidebar: React.FC<SidebarProps> = ({
     `${Math.round(value).toLocaleString()} ${formatCurrencyLabel(currency)}`;
 
   return (
+    <div className="h-full min-h-0 w-full flex flex-col bg-white">
+      <div className="flex-shrink-0 px-5 pt-4 pb-4 space-y-2.5 border-b border-[#d9d9d9] bg-white">
+        <input
+          type="text"
+          placeholder={isProductLimitReached ? 'Max 5 produkter samtidigt' : 'Klistra in länk till golv...'}
+          value={productUrl}
+          onChange={(e) => {
+            setProductUrl(e.target.value);
+            if (productError) setProductError(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') fetchProductData();
+          }}
+          className="w-full bg-white border border-[#d9d9d9] rounded-full px-4 py-2 text-[10px] focus:outline-none focus:border-[#C41230] transition"
+        />
+        <button
+          onClick={fetchProductData}
+          disabled={isFetching || !productUrl.trim() || isProductLimitReached}
+          className={`pf-action-heading pf-loading-button w-full py-2.5 rounded-full bg-[#3D8B37] text-white font-semibold transition-colors hover:bg-[#2e6a2a] disabled:cursor-not-allowed disabled:opacity-55 ${isFetching ? 'is-loading' : ''}`}
+        >
+          {isFetching ? `Hämtar produktdata… ${fetchElapsed}s` : 'Hämta produkt'}
+        </button>
+        {productError && (
+          <p className="text-[9px] text-[#C41230] leading-relaxed">{productError}</p>
+        )}
+      </div>
     <div
       data-scrolling={isSidebarScrolling ? 'true' : 'false'}
       onScroll={handleSidebarScroll}
-      className="pf-scrollbar-on-scroll h-full min-h-0 w-full overflow-y-auto bg-white"
+      className="pf-scrollbar-on-scroll flex-1 min-h-0 overflow-y-auto"
     >
       <div className="flex flex-col">
-        <div className="px-5 pt-5 pb-4">
-          <h2 className="text-[13px] font-semibold text-[#1a1a1a]">Valda produkter</h2>
-        </div>
 
         <section className="space-y-0">
-          <div className="px-5 pb-4 space-y-2.5">
-            <input
-              type="text"
-              placeholder={isProductLimitReached ? 'Max 3 produkter samtidigt' : 'Klistra in länk till golv...'}
-              value={productUrl}
-              onChange={(e) => {
-                setProductUrl(e.target.value);
-                if (productError) setProductError(null);
-              }}
-              className="w-full bg-white border border-[#d9d9d9] rounded-full px-4 py-2 text-[10px] focus:outline-none focus:border-[#C41230] transition"
-            />
-            <button
-              onClick={fetchProductData}
-              disabled={isFetching || !productUrl.trim() || isProductLimitReached}
-              className={`pf-action-heading pf-loading-button w-full py-2.5 rounded-full bg-[#3D8B37] text-white font-semibold transition-colors hover:bg-[#2e6a2a] disabled:cursor-not-allowed disabled:opacity-55 ${isFetching ? 'is-loading' : ''}`}
-            >
-              {isFetching ? `Hämtar produktdata… ${fetchElapsed}s` : 'Hämta produkt'}
-            </button>
-            {productError && (
-              <p className="text-[9px] text-[#C41230] leading-relaxed">{productError}</p>
-            )}
-            {isProductLimitReached && (
-              <p className="text-[9px] text-[#767676] leading-relaxed">Max 3 produkter samtidigt</p>
-            )}
-          </div>
 
           {(isFetching || savedProducts.length > 0) && (
             <div className="border-t border-[#d9d9d9]">
@@ -220,7 +230,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               )}
               {savedProducts.map((product) => {
-                const totalPrice = productTotalsById[product.id] ?? 0;
+                const productStats = productStatsById[product.id] ?? { area: 0, plankCount: 0, packageCount: 0, wasteArea: 0, wastePercent: 0 };
                 const isActive = activeProductId === product.id;
                 const pricePerSquareMeter = getPricePerSquareMeter(product);
                 const promotionLabel = getPromotionLabel(product);
@@ -250,9 +260,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="text-[#767676] hover:text-[#1a1a1a] hover:underline truncate block"
+                          className="text-[#767676] hover:text-[#1a1a1a] hover:underline"
                         >
-                          {(() => { try { return new URL(product.url).hostname.replace(/^www\./, ''); } catch { return product.url; } })()}
+                          {(() => { try { const u = new URL(product.url); const h = u.hostname.replace(/^www\./, ''); const p = u.pathname.slice(1); return h + '/' + p.slice(0, 9) + (p.length > 9 ? '…' : ''); } catch { return product.url.slice(0, 20) + '…'; } })()}
                         </a>
                       </div>
                     </div>
@@ -301,10 +311,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                           )}
                         </div>
 
-                        <div className="flex items-center justify-between gap-2 text-[8px]">
-                          <span className="text-[#767676]">Leverans: {deliveryEstimate}</span>
-                          <span className="text-[12px] font-bold text-[#C41230]">{formatPrice(totalPrice, product.currency)}</span>
-                        </div>
+                        <div className="text-[8px] text-[#767676]">Leverans: {deliveryEstimate}</div>
                       </div>
                     </div>
 
@@ -315,50 +322,172 @@ const Sidebar: React.FC<SidebarProps> = ({
                         <span>Kundfavorit! Över 867 köp den senaste veckan</span>
                       </div>
                     )}
+
+                    {/* Stats row */}
+                    <div className="border-t border-[#EAE6E3] flex items-stretch px-4 py-2.5">
+                      {[
+                        { label: 'Area', value: `${productStats.area.toFixed(2)} m²` },
+                        { label: 'Åtgång', value: `${productStats.plankCount} st` },
+                        { label: 'Förp.', value: `${productStats.packageCount} st` },
+                        { label: 'Spill', value: `${productStats.wastePercent.toFixed(1)}%`, isSpill: true },
+                      ].map((stat, i) => (
+                        <React.Fragment key={stat.label}>
+                          {i > 0 && <div className="w-px self-stretch bg-[#EAE6E3] mx-2" />}
+                          <div className="flex flex-col items-center flex-1">
+                            <span className="text-[8px] font-medium text-[#9A9A9A] whitespace-nowrap">{stat.label}</span>
+                            <span className={`mt-0.5 text-[11px] font-bold leading-none whitespace-nowrap ${stat.isSpill ? (productStats.wastePercent <= 15 ? 'text-[#3D8B37]' : 'text-[#1A1A1A]') : 'text-[#1A1A1A]'}`}>
+                              {stat.value}
+                            </span>
+                          </div>
+                        </React.Fragment>
+                      ))}
+                      <div className="w-px self-stretch bg-[#EAE6E3] mx-2" />
+                      <div className="flex flex-col items-end justify-center flex-shrink-0">
+                        <span className="text-[8px] font-medium text-[#9A9A9A] whitespace-nowrap">Summa</span>
+                        <span className="mt-0.5 text-[11px] font-bold leading-none text-[#C41230] whitespace-nowrap">
+                          {productStats.totalPrice ? formatPrice(productStats.totalPrice, product.currency) : '–'}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 );
               })}
             </div>
           )}
 
-          <div className="border-t border-[#d9d9d9] px-5 py-4">
-            <label className="block text-[9px] font-medium text-[#767676] mb-3">Plankmått (mm)</label>
-            <div className="flex gap-4">
-              <div className="flex-1">
-                <span className="text-[9px] text-[#767676] block mb-1 font-medium">Längd</span>
-                <input
-                  type="number"
-                  min="0"
-                  value={settings.length === 0 ? '' : settings.length}
-                  onChange={(e) => handleChange('length', e.target.value)}
-                  className="w-full bg-white border-b border-[#d9d9d9] py-2 text-sm focus:outline-none focus:border-[#C41230] transition text-[#1a1a1a]"
-                />
+          <div
+            role="button"
+            tabIndex={0}
+            onClick={onActivateManual}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                onActivateManual();
+              }
+            }}
+            className={`border-t border-[#d9d9d9] text-left cursor-pointer transition-colors ${
+              isManualActive ? 'bg-[#fff8f8] border-l-2 border-l-[#C41230]' : 'hover:bg-[#f9f9f9]'
+            }`}
+          >
+            <div className="px-5 pt-4 pb-3">
+              <h2 className="text-[13px] font-semibold text-[#1a1a1a] mb-3">Eget golv</h2>
+              <div className="grid grid-cols-4 gap-4">
+                <div>
+                  <span className="text-[9px] text-[#767676] block mb-1 font-medium">Längd</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={manualFloorSettings.length === 0 ? '' : manualFloorSettings.length}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      onManualFloorSettingsChange({ ...manualFloorSettings, length: isNaN(val) ? 0 : val });
+                    }}
+                    className="w-full bg-white border-b border-[#d9d9d9] py-2 text-sm focus:outline-none focus:border-[#C41230] transition text-[#1a1a1a]"
+                  />
+                </div>
+                <div>
+                  <span className="text-[9px] text-[#767676] block mb-1 font-medium">Bredd</span>
+                  <input
+                    type="number"
+                    min="0"
+                    value={manualFloorSettings.width === 0 ? '' : manualFloorSettings.width}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      onManualFloorSettingsChange({ ...manualFloorSettings, width: isNaN(val) ? 0 : val });
+                    }}
+                    className="w-full bg-white border-b border-[#d9d9d9] py-2 text-sm focus:outline-none focus:border-[#C41230] transition text-[#1a1a1a]"
+                  />
+                </div>
+                <div>
+                  <span className="text-[9px] text-[#767676] block mb-1 font-medium">St/frp</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={manualFloorSettings.planksPerPackage === 0 ? '' : manualFloorSettings.planksPerPackage}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value, 10);
+                      onManualFloorSettingsChange({ ...manualFloorSettings, planksPerPackage: isNaN(val) ? 0 : Math.max(1, val) });
+                    }}
+                    className="w-full bg-white border-b border-[#d9d9d9] py-2 text-sm focus:outline-none focus:border-[#C41230] transition text-[#1a1a1a]"
+                  />
+                </div>
+                <div>
+                  <span className="text-[9px] text-[#767676] block mb-1 font-medium">Pris/pkt</span>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="kr"
+                    value={manualFloorSettings.pricePerPackage === 0 ? '' : manualFloorSettings.pricePerPackage}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      const val = parseFloat(e.target.value);
+                      onManualFloorSettingsChange({ ...manualFloorSettings, pricePerPackage: isNaN(val) ? 0 : val });
+                    }}
+                    className="w-full bg-white border-b border-[#d9d9d9] py-2 text-sm focus:outline-none focus:border-[#C41230] transition text-[#1a1a1a]"
+                  />
+                </div>
               </div>
-              <div className="flex-1">
-                <span className="text-[9px] text-[#767676] block mb-1 font-medium">Bredd</span>
-                <input
-                  type="number"
-                  min="0"
-                  value={settings.width === 0 ? '' : settings.width}
-                  onChange={(e) => handleChange('width', e.target.value)}
-                  className="w-full bg-white border-b border-[#d9d9d9] py-2 text-sm focus:outline-none focus:border-[#C41230] transition text-[#1a1a1a]"
-                />
-              </div>
-              <div className="flex-1">
-                <span className="text-[9px] text-[#767676] block mb-1 font-medium">Antal per förpackning</span>
-                <input
-                  type="number"
-                  min="1"
-                  value={settings.planksPerPackage === 0 ? '' : settings.planksPerPackage}
-                  onChange={(e) => handleChange('planksPerPackage', e.target.value)}
-                  className="w-full bg-white border-b border-[#d9d9d9] py-2 text-sm focus:outline-none focus:border-[#C41230] transition text-[#1a1a1a]"
-                />
+            </div>
+
+            {/* Stats row for Eget golv */}
+            <div className="border-t border-[#EAE6E3] flex items-stretch px-4 py-2.5">
+              {[
+                { label: 'Area', value: `${manualStats.area.toFixed(2)} m²` },
+                { label: 'Åtgång', value: `${manualStats.plankCount} st` },
+                { label: 'Förp.', value: `${manualStats.packageCount} st` },
+                { label: 'Spill', value: `${manualStats.wastePercent.toFixed(1)}%`, isSpill: true },
+              ].map((stat, i) => (
+                <React.Fragment key={stat.label}>
+                  {i > 0 && <div className="w-px self-stretch bg-[#EAE6E3] mx-2" />}
+                  <div className="flex flex-col items-center flex-1">
+                    <span className="text-[8px] font-medium text-[#9A9A9A] whitespace-nowrap">{stat.label}</span>
+                    <span className={`mt-0.5 text-[11px] font-bold leading-none whitespace-nowrap ${stat.isSpill ? (manualStats.wastePercent <= 15 ? 'text-[#3D8B37]' : 'text-[#1A1A1A]') : 'text-[#1A1A1A]'}`}>
+                      {stat.value}
+                    </span>
+                  </div>
+                </React.Fragment>
+              ))}
+              <div className="w-px self-stretch bg-[#EAE6E3] mx-2" />
+              <div className="flex flex-col items-end justify-center flex-shrink-0">
+                <span className="text-[8px] font-medium text-[#9A9A9A] whitespace-nowrap">Summa</span>
+                <span className="mt-0.5 text-[11px] font-bold leading-none text-[#C41230] whitespace-nowrap">
+                  {manualStats.totalPrice ? formatPrice(manualStats.totalPrice, 'SEK') : '–'}
+                </span>
               </div>
             </div>
           </div>
         </section>
 
       </div>
+    </div>
+
+    {/* Sticky bottom bar */}
+    <div className="border-t border-[#d9d9d9] px-5 py-4 flex items-center gap-2 flex-shrink-0 bg-white">
+      <button
+        type="button"
+        onClick={() => setSettings({ ...settings, layoutRotated: !settings.layoutRotated })}
+        title={settings.layoutRotated ? 'Rotera 90° tillbaka' : 'Rotera 90°'}
+        className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full border border-[#d9d9d9] bg-white transition-colors hover:bg-[#f0f0f0]"
+        aria-label={settings.layoutRotated ? 'Rotera 90° tillbaka' : 'Rotera 90°'}
+      >
+        <svg width="20" height="18" viewBox="0 0 26 24" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="1" y="1" width="5" height="14" rx="1" stroke={settings.layoutRotated ? '#1a1a1a' : '#CCCCCC'} />
+          <rect x="8" y="13" width="14" height="5" rx="1" stroke={settings.layoutRotated ? '#CCCCCC' : '#1a1a1a'} />
+          <path d="M7 4 C14 2, 18 5, 18 11.5" stroke="#CCCCCC" />
+          <polyline points="15.5,10 18,11.5 16.5,14" stroke="#CCCCCC" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={onOptimize}
+        className="pf-action-heading flex-1 py-2.5 rounded-full border border-[#1a1a1a] bg-white text-[10px] font-semibold text-[#1a1a1a] transition-colors hover:bg-[#f0f0f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
+      >
+        Optimera läggning
+      </button>
+    </div>
     </div>
   );
 };

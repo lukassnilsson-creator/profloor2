@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Point, ImportedDrawingBackground } from '../types';
 import { getDistance } from '../geometry';
 import { usePlanEditor } from '../hooks/usePlanEditor';
+import { addOrInsertPoint, forceSnapPointTo90 } from '../pointEditing';
 
 interface ImportWizardProps {
   initialFile: File | null;
@@ -21,8 +22,14 @@ interface AISuggestion {
 interface ContextMenu {
   x: number;
   y: number;
-  pointIdx: number;
+  kind: 'point' | 'edge';
+  pointIdx?: number;
+  edgeIdx?: number;
+  cursor?: Point;
 }
+
+// Must match --pf-sidebar-w in index.css
+const SIDEBAR_W = 400;
 
 const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, onCancel }) => {
   const [step, setStep] = useState<'analyze' | 'refine'>('analyze');
@@ -89,10 +96,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
   };
 
   useEffect(() => {
-    if (!initialFile) {
-      onCancel();
-      return;
-    }
+    if (!initialFile) { onCancel(); return; }
     startImportFromFile(initialFile);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialFile]);
@@ -112,10 +116,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
         throw new Error(payload?.error || 'Kunde inte tolka ritningen just nu.');
       }
       const result: AISuggestion = await res.json();
-      
+
       const initialPoints = result.points.map(p => ({ x: p.x, y: p.y }));
       setDetectedPoints(initialPoints);
-      
+
       if (result.referenceWall) {
         setSelectedEdgeIdx(result.referenceWall.edgeIndex);
         setScaleValue(result.referenceWall.lengthMm);
@@ -125,7 +129,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
 
       setStep('refine');
     } catch (error) {
-      console.error("AI Analysis failed", error);
+      console.error('AI Analysis failed', error);
       setAnalysisError(error instanceof Error ? error.message : 'Kunde inte tolka ritningen. Försök igen.');
     } finally {
       stopAnalysisTimer();
@@ -142,9 +146,12 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
 
   const handleCanvasMouseDown = (e: React.MouseEvent) => {
     if (contextMenu) { setContextMenu(null); return; }
-
     if (e.button !== 0) return;
     handlePrimaryDown(getCanvasMousePos(e));
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent) => {
+    handlePointerMove(getCanvasMousePos(e));
   };
 
   const handleDeletePoint = (idx: number) => {
@@ -152,8 +159,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
     setContextMenu(null);
   };
 
-  const handleCanvasMouseMove = (e: React.MouseEvent) => {
-    handlePointerMove(getCanvasMousePos(e));
+  const handleAddPoint = (edgeIdx: number, cursor: Point) => {
+    const nextPoints = addOrInsertPoint(detectedPoints, cursor, edgeIdx, snapToGrid, gridSize);
+    if (nextPoints) setDetectedPoints(nextPoints);
+    setContextMenu(null);
   };
 
   useEffect(() => {
@@ -178,51 +187,44 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
 
   useEffect(() => {
     if (!snapToGrid) return;
-    if (gridSize < 10) {
-      setGridSize(10);
-    }
+    if (gridSize < 10) setGridSize(10);
   }, [snapToGrid, gridSize]);
 
   useEffect(() => {
     if (!image || !canvasRef.current) return;
-    
+
     if (!imageRef.current) {
       const img = new Image();
       img.onload = () => { imageRef.current = img; draw(); };
       img.src = image;
-    } else { 
-      draw(); 
+    } else {
+      draw();
     }
 
     function draw() {
       const img = imageRef.current;
       const canvas = canvasRef.current;
       if (!img || !canvas) return;
-      
       const ctx = canvas.getContext('2d');
-      if (!ctx) return; // TypeScript safety check
+      if (!ctx) return;
 
       const containerW = canvas.parentElement?.clientWidth || 800;
       const containerH = canvas.parentElement?.clientHeight || 600;
       const ratio = img.width / img.height;
-      let drawW = containerW; 
+      let drawW = containerW;
       let drawH = containerW / ratio;
-      
-      if (drawH > containerH) { 
-        drawH = containerH; 
-        drawW = containerH * ratio; 
-      }
-      
-      canvas.width = drawW; 
+      if (drawH > containerH) { drawH = containerH; drawW = containerH * ratio; }
+
+      canvas.width = drawW;
       canvas.height = drawH;
       const nextEditorScale = Math.max(0.0001, Math.min(drawW, drawH) / 1000);
       setEditorScale(prev => Math.abs(prev - nextEditorScale) > 0.0001 ? nextEditorScale : prev);
-      
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.drawImage(img, 0, 0, drawW, drawH);
-      
+
       const toPx = (p: Point) => ({ x: (p.x / 1000) * drawW, y: (p.y / 1000) * drawH });
-      
+
       if (detectedPoints.length > 0) {
         ctx.beginPath();
         const start = toPx(detectedPoints[0]);
@@ -231,7 +233,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
         ctx.closePath();
         ctx.strokeStyle = 'rgba(210, 183, 172, 0.5)'; ctx.lineWidth = 2; ctx.stroke();
         ctx.fillStyle = 'rgba(210, 183, 172, 0.15)'; ctx.fill();
-        
+
         detectedPoints.forEach((p1_norm, i) => {
           const p2_norm = detectedPoints[(i + 1) % detectedPoints.length];
           const p1 = toPx(p1_norm); const p2 = toPx(p2_norm);
@@ -243,9 +245,10 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
             ctx.lineWidth = isSelected ? 6 : 4; ctx.stroke();
           }
         });
-        
+
         detectedPoints.forEach((p_norm, i) => {
-          const pt = toPx(p_norm); ctx.beginPath();
+          const pt = toPx(p_norm);
+          ctx.beginPath();
           ctx.arc(pt.x, pt.y, draggingIdx === i ? 8 : (hoverIdx === i ? 6 : 5), 0, Math.PI * 2);
           ctx.fillStyle = draggingIdx === i ? '#D2B7AC' : '#1A1A1A'; ctx.fill();
           ctx.strokeStyle = '#FFFFFF'; ctx.lineWidth = 1.5; ctx.stroke();
@@ -276,213 +279,218 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
       y: (toImageSpace(p).y - firstPointImage.y) * mmPerImageUnit
     }));
 
-    const backgroundDrawing: ImportedDrawingBackground | null = image
-      ? {
-          src: image,
-          x: -firstPointImage.x * mmPerImageUnit,
-          y: -firstPointImage.y * mmPerImageUnit,
-          width: imageWidth * mmPerImageUnit,
-          height: imageHeight * mmPerImageUnit
-        }
-      : null;
+    const backgroundDrawing: ImportedDrawingBackground | null = image ? {
+      src: image,
+      x: -firstPointImage.x * mmPerImageUnit,
+      y: -firstPointImage.y * mmPerImageUnit,
+      width: imageWidth * mmPerImageUnit,
+      height: imageHeight * mmPerImageUnit
+    } : null;
 
     onComplete(mmPoints, backgroundDrawing);
   };
 
-  const getReferenceOverlayPosition = () => {
-    if (selectedEdgeIdx === null || detectedPoints.length < 2) return null;
-    const canvas = canvasRef.current;
-    if (!canvas) return null;
-
-    const p1 = detectedPoints[selectedEdgeIdx];
-    const p2 = detectedPoints[(selectedEdgeIdx + 1) % detectedPoints.length];
-    const midX = ((p1.x + p2.x) / 2000) * canvas.width;
-    const midY = ((p1.y + p2.y) / 2000) * canvas.height;
-    const dx = p2.x - p1.x;
-    const dy = p2.y - p1.y;
-    const edgeLength = Math.hypot(dx, dy) || 1;
-    const nx = -dy / edgeLength;
-    const ny = dx / edgeLength;
-    const candidates = [34, -34, 50, -50].map((distance) => ({
-      left: canvas.offsetLeft + midX + nx * distance,
-      top: canvas.offsetTop + midY + ny * distance
-    }));
-
-    const handlePoints = detectedPoints.map((point) => ({
-      x: canvas.offsetLeft + (point.x / 1000) * canvas.width,
-      y: canvas.offsetTop + (point.y / 1000) * canvas.height
-    }));
-
-    const minDistanceToHandle = 48;
-    const selectedCandidate = candidates.find((candidate) =>
-      handlePoints.every((handlePoint) => {
-        const dx = candidate.left - handlePoint.x;
-        const dy = candidate.top - handlePoint.y;
-        return Math.hypot(dx, dy) > minDistanceToHandle;
-      })
-    ) ?? candidates[0];
-
-    const container = canvas.parentElement;
-    if (!container) return selectedCandidate;
-
-    const overlayHalfWidth = 72;
-    const overlayHalfHeight = 36;
-    return {
-      left: Math.min(
-        container.clientWidth - overlayHalfWidth,
-        Math.max(overlayHalfWidth, selectedCandidate.left)
-      ),
-      top: Math.min(
-        container.clientHeight - overlayHalfHeight,
-        Math.max(overlayHalfHeight, selectedCandidate.top)
-      )
-    };
-  };
-
-  const referenceOverlayPos = step === 'refine' ? getReferenceOverlayPosition() : null;
-
   return (
-    <div className="fixed inset-0 z-[100] bg-white flex flex-col items-center justify-center p-4 md:p-10">
-      <div className="max-w-5xl w-full h-full flex flex-col bg-white overflow-hidden shadow-2xl border border-[#E5E5E5]">
-        <header className="p-6 md:p-8 border-b border-[#F1F1F1] flex justify-between items-center">
-          <div>
-            <h2 className="text-xl md:text-2xl font-bold">Importera Ritning</h2>
-            <p className="text-[9px] md:text-[10px] text-[#A0A0A0] uppercase tracking-widest mt-1">Automatisk tolkning av ritning</p>
-          </div>
-          <button onClick={onCancel} className="pf-action-heading font-bold uppercase tracking-widest text-[#A0A0A0] hover:text-[#1A1A1A]">Avbryt</button>
-        </header>
+    <div className="fixed inset-0 z-[100] flex flex-col">
+      {/* Topbar area — grayed out, non-interactive */}
+      <div
+        className="h-[102px] sm:h-[114px] flex-shrink-0 bg-black/40"
+        style={{ pointerEvents: 'none' }}
+        aria-hidden="true"
+      />
 
-        <div className="flex-1 overflow-hidden relative bg-[#FBFBFB] flex items-center justify-center p-4">
-          {step === 'analyze' && (
-            <div className="text-center space-y-6">
-              {!analysisError && (
-                <>
-                  <div className="relative w-16 h-16 mx-auto flex items-center justify-center">
-                    <div className="absolute inset-0 border-2 border-[#D2B7AC]/20 rounded-full"></div>
-                    <div className="absolute inset-0 border-2 border-[#D2B7AC] border-t-transparent rounded-full animate-spin"></div>
-                    <div className="relative text-[10px] font-bold text-[#1A1A1A]">{analysisSeconds}s</div>
-                  </div>
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-[#1A1A1A]">Tolkar ritning…</p>
-                </>
-              )}
-              {analysisError && (
-                <div className="space-y-3 max-w-md">
-                  <p className="text-[10px] font-bold uppercase tracking-widest text-red-600">Kunde inte tolka ritningen</p>
-                  <p className="text-[10px] text-[#666] leading-relaxed">{analysisError}</p>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (image) {
-                        runAIAnalysis(image);
-                      }
-                    }}
-                    className="pf-action-heading px-6 py-2 bg-[#1A1A1A] text-white font-bold uppercase tracking-widest hover:bg-[#333] transition-colors"
-                  >
-                    Försök igen
-                  </button>
-                </div>
-              )}
+      {/* Content row */}
+      <div className="flex flex-1 min-h-0">
+        {/* Sidebar area — grayed out, non-interactive */}
+        <div
+          className="flex-shrink-0 bg-black/40"
+          style={{ width: `${SIDEBAR_W}px`, pointerEvents: 'none' }}
+          aria-hidden="true"
+        />
+
+        {/* Active canvas area */}
+        <div className="flex flex-1 min-w-0 min-h-0 flex-col bg-[#FBFBFB]">
+
+          {/* Header */}
+          <div className="flex-shrink-0 px-6 py-4 border-b border-[#F1F1F1] bg-white flex items-center justify-between">
+            <div>
+              <h2 className="pf-action-heading text-sm font-bold text-[#1A1A1A]">Importera ritning</h2>
+              <p className="text-[9px] text-[#A0A0A0] uppercase tracking-widest mt-0.5">Automatisk tolkning av planlösning</p>
             </div>
-          )}
+            <button
+              onClick={onCancel}
+              className="pf-action-heading text-[9px] font-bold uppercase tracking-widest text-[#A0A0A0] hover:text-[#1A1A1A] transition-colors"
+            >
+              Avbryt
+            </button>
+          </div>
 
-          {step === 'refine' && (
-            <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
-              <div className="absolute top-4 right-4 z-20 flex items-center gap-3 bg-white/95 border border-[#E5E5E5] px-3 py-1.5 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <span className="text-[8px] font-bold text-[#A0A0A0] uppercase tracking-widest">Grid</span>
-                  <input
-                    type="number"
-                    value={gridSize}
-                    onChange={(e) => setGridSize(Math.max(10, parseInt(e.target.value, 10) || 10))}
-                    className="w-10 h-6 bg-white border border-[#E5E5E5] text-[9px] font-bold text-center focus:outline-none focus:border-[#D2B7AC]"
+          {/* Main content */}
+          <div className="flex-1 min-h-0 relative overflow-hidden flex items-center justify-center">
+
+            {step === 'analyze' && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                {/* Skeleton floor outline background */}
+                <svg
+                  width="280" height="190"
+                  viewBox="0 0 280 190"
+                  fill="none"
+                  className="absolute opacity-[0.12] animate-pulse"
+                  aria-hidden="true"
+                >
+                  {/* L-shaped room outline */}
+                  <polygon
+                    points="24,22 256,22 256,100 156,100 156,168 24,168"
+                    stroke="#1A1A1A" strokeWidth="2" fill="rgba(0,0,0,0.04)"
                   />
-                </div>
-                <div className="w-px h-3 bg-[#E5E5E5]"></div>
-                <button
-                  onClick={() => setSnapToGrid(!snapToGrid)}
-                  className={`flex items-center gap-1.5 text-[8px] font-bold uppercase tracking-widest transition-colors ${snapToGrid ? 'text-[#1A1A1A]' : 'text-[#A0A0A0]'}`}
-                >
-                  <div className={`w-2.5 h-2.5 border ${snapToGrid ? 'bg-[#1A1A1A] border-[#1A1A1A]' : 'bg-white border-[#E5E5E5]'}`}></div>
-                  Snap
-                </button>
+                  {/* Plank row lines */}
+                  {[44,62,80,98,116,134,152].map((y) => (
+                    <line
+                      key={y}
+                      x1="26" y1={y}
+                      x2={y >= 100 ? 154 : 254} y2={y}
+                      stroke="#1A1A1A" strokeWidth="0.8" strokeDasharray="6 3"
+                    />
+                  ))}
+                  {/* Plank joint lines (vertical) */}
+                  {[80,160,220].map((x) => (
+                    <line key={x} x1={x} y1="22" x2={x} y2={x > 154 ? 100 : 95} stroke="#1A1A1A" strokeWidth="0.5" strokeDasharray="3 3" />
+                  ))}
+                </svg>
+
+                {!analysisError && (
+                  <div className="relative z-10 text-center space-y-5 px-6 max-w-sm">
+                    <div className="relative w-14 h-14 mx-auto flex items-center justify-center">
+                      <div className="absolute inset-0 border-2 border-[#D2B7AC]/20 rounded-full" />
+                      <div className="absolute inset-0 border-2 border-[#D2B7AC] border-t-transparent rounded-full animate-spin" />
+                      <div className="relative text-[10px] font-bold text-[#1A1A1A]">{analysisSeconds}s</div>
+                    </div>
+                    <div>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-[#1A1A1A]">Tolkar ritning…</p>
+                      <p className="mt-2 text-[9px] text-[#A0A0A0] leading-relaxed">
+                        AI-analysen tar vanligtvis <span className="font-semibold text-[#6A6A6A]">ca 30 sekunder</span> att slutföra. Håll fönstret öppet under tiden.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {analysisError && (
+                  <div className="relative z-10 text-center space-y-3 max-w-sm px-6">
+                    <p className="text-[10px] font-bold uppercase tracking-widest text-red-600">Kunde inte tolka ritningen</p>
+                    <p className="text-[10px] text-[#666] leading-relaxed">{analysisError}</p>
+                    <button
+                      type="button"
+                      onClick={() => { if (image) runAIAnalysis(image); }}
+                      className="pf-action-heading px-6 py-2 bg-[#1A1A1A] text-white font-bold uppercase tracking-widest hover:bg-[#333] transition-colors"
+                    >
+                      Försök igen
+                    </button>
+                  </div>
+                )}
               </div>
+            )}
 
-              <canvas 
-                ref={canvasRef} 
-                onMouseDown={handleCanvasMouseDown}
-                onMouseMove={handleCanvasMouseMove}
-                onMouseUp={handlePointerUp}
-                onMouseLeave={handlePointerUp}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  if (closestEdgeIdx !== null) {
-                    setSelectedEdgeIdx(closestEdgeIdx);
-                    setContextMenu(null);
-                    return;
-                  }
-                  if (hoverIdx !== null && detectedPoints.length > 3) {
-                    setContextMenu({ x: e.clientX, y: e.clientY, pointIdx: hoverIdx });
-                  }
-                }}
-                className="shadow-2xl border border-[#E5E5E5] max-w-full max-h-full object-contain"
-                style={{ cursor: draggingIdx !== null ? 'grabbing' : hoverIdx !== null ? 'pointer' : closestEdgeIdx !== null ? 'copy' : 'crosshair' }}
-              />
+            {step === 'refine' && (
+              <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
+                <canvas
+                  ref={canvasRef}
+                  onMouseDown={handleCanvasMouseDown}
+                  onMouseMove={handleCanvasMouseMove}
+                  onMouseUp={handlePointerUp}
+                  onMouseLeave={handlePointerUp}
+                  onDoubleClick={() => {
+                    if (hoverIdx !== null) {
+                      const snapped = forceSnapPointTo90(detectedPoints, hoverIdx);
+                      if (snapped !== detectedPoints) setDetectedPoints(snapped);
+                    }
+                  }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    const cursor = getCanvasMousePos(e);
+                    if (hoverIdx !== null) {
+                      setContextMenu({ x: e.clientX, y: e.clientY, kind: 'point', pointIdx: hoverIdx });
+                    } else if (closestEdgeIdx !== null) {
+                      setContextMenu({ x: e.clientX, y: e.clientY, kind: 'edge', edgeIdx: closestEdgeIdx, cursor });
+                    }
+                  }}
+                  className="shadow-2xl border border-[#E5E5E5] max-w-full max-h-full object-contain"
+                  style={{ cursor: draggingIdx !== null ? 'grabbing' : hoverIdx !== null ? 'pointer' : 'crosshair' }}
+                />
 
-              {referenceOverlayPos && (
-                <div
-                  className="absolute z-30 bg-white border border-[#D2B7AC] shadow-md px-3 py-2"
-                  style={{ left: referenceOverlayPos.left, top: referenceOverlayPos.top, transform: 'translate(-50%, -50%)' }}
-                >
-                  <label className="block text-[8px] font-bold text-[#A0A0A0] uppercase tracking-widest mb-1">Referens</label>
-                  <div className="flex items-center gap-1">
+                {contextMenu && (
+                  <div
+                    className="fixed z-50 bg-white border border-[#E5E5E5] shadow-2xl py-1 min-w-[160px]"
+                    style={{ left: contextMenu.x, top: contextMenu.y }}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {contextMenu.kind === 'edge' && (
+                      <>
+                        <button
+                          onClick={() => handleAddPoint(contextMenu.edgeIdx!, contextMenu.cursor!)}
+                          className="w-full px-4 py-2 text-left text-[9px] font-bold uppercase tracking-widest text-[#1A1A1A] hover:bg-[#F6F2EF]"
+                        >
+                          Lägg till punkt
+                        </button>
+                        <button
+                          onClick={() => { setSelectedEdgeIdx(contextMenu.edgeIdx!); setContextMenu(null); }}
+                          className="w-full px-4 py-2 text-left text-[9px] font-bold uppercase tracking-widest text-[#1A1A1A] hover:bg-[#F6F2EF]"
+                        >
+                          Välj som referenskant
+                        </button>
+                      </>
+                    )}
+                    {contextMenu.kind === 'point' && detectedPoints.length > 3 && (
+                      <button
+                        onClick={() => handleDeletePoint(contextMenu.pointIdx!)}
+                        className="w-full px-4 py-2 text-left text-[9px] font-bold uppercase tracking-widest text-red-600 hover:bg-[#FFF5F5]"
+                      >
+                        Ta bort hörn
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Footer */}
+          {step === 'refine' && (
+            <div className="flex-shrink-0 px-6 py-4 border-t border-[#F1F1F1] bg-white flex items-center justify-between gap-6">
+              <div className="flex items-center gap-6 min-w-0">
+                <p className="text-[9px] text-[#888] uppercase tracking-wider leading-relaxed hidden md:block">
+                  Dra hörn för att justera · Högerklicka kant för att lägga till punkt · Högerklicka hörn för att ta bort
+                </p>
+                <div className="flex-shrink-0 border border-[#D2B7AC] bg-white px-4 py-2.5">
+                  <label className="block text-[8px] font-bold text-[#A0A0A0] uppercase tracking-widest mb-1.5">
+                    Referenskantens längd
+                  </label>
+                  <div className="flex items-center gap-1.5">
                     <input
                       type="number"
                       value={scaleValue}
                       onChange={(e) => setScaleValue(parseInt(e.target.value, 10) || 0)}
-                      className="w-20 bg-transparent border-b border-[#1A1A1A] text-[11px] font-bold text-[#1A1A1A] focus:outline-none"
+                      className="w-24 bg-transparent border-b border-[#1A1A1A] text-[13px] font-bold text-[#1A1A1A] focus:outline-none"
                     />
                     <span className="text-[9px] font-bold text-[#1A1A1A] uppercase tracking-widest">mm</span>
                   </div>
-                  <div className="text-[8px] font-bold text-[#D2B7AC] uppercase tracking-wider mt-1">Referens: {scaleValue} mm</div>
-                </div>
-              )}
-
-              {contextMenu && (
-                <div className="fixed z-50 bg-white border border-[#E5E5E5] shadow-2xl py-1 min-w-[140px]" style={{ left: contextMenu.x, top: contextMenu.y }}>
-                  {detectedPoints.length > 3 && (
-                    <button onClick={() => handleDeletePoint(contextMenu.pointIdx)} className="w-full px-4 py-2 text-left text-[9px] font-bold uppercase tracking-widest text-red-600 hover:bg-[#FFF5F5]">Ta bort hörn</button>
+                  {selectedEdgeIdx !== null && (
+                    <p className="text-[8px] text-[#D2B7AC] uppercase tracking-wider mt-1">
+                      Kant {selectedEdgeIdx + 1} vald
+                    </p>
                   )}
                 </div>
-              )}
+              </div>
+
+              <button
+                onClick={finalize}
+                disabled={selectedEdgeIdx === null || detectedPoints.length < 3}
+                className="pf-action-heading flex-shrink-0 px-10 py-4 bg-[#1A1A1A] text-white text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#333] transition-all disabled:opacity-20 shadow-lg"
+              >
+                Importera
+              </button>
             </div>
           )}
         </div>
-
-        <footer className="p-6 md:p-8 border-t border-[#F1F1F1] bg-white">
-          {step === 'refine' && (
-            <div className="flex flex-col md:flex-row justify-between items-center gap-6">
-              <div className="space-y-2 max-w-md">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-[#1A1A1A]"></div>
-                  <span className="text-[10px] font-bold uppercase tracking-widest text-[#1A1A1A]">Verifiera skala</span>
-                </div>
-                <p className="text-[10px] text-[#888] leading-relaxed uppercase tracking-wider">
-                  Dra hörn för att flytta, klicka nära kant för att lägga till hörn, högerklicka hörn för att ta bort. Hovra en kant och högerklicka för att välja referenskant.
-                </p>
-              </div>
-
-              <div className="flex flex-col md:flex-row items-center gap-6">
-                <button 
-                  onClick={finalize}
-                  disabled={selectedEdgeIdx === null || detectedPoints.length < 3}
-                  className="px-10 py-4 bg-[#1A1A1A] text-white text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#333] transition-all disabled:opacity-20 shadow-lg"
-                >
-                  Importera
-                </button>
-              </div>
-            </div>
-          )}
-        </footer>
       </div>
     </div>
   );

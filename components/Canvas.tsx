@@ -428,6 +428,14 @@ const Canvas: React.FC<CanvasProps> = ({
       });
 
       const contrast = settings.visualContrast;
+      ctx.save();
+      ctx.beginPath();
+      points.forEach((point, index) => {
+        if (index === 0) ctx.moveTo(point.x * scale, point.y * scale);
+        else ctx.lineTo(point.x * scale, point.y * scale);
+      });
+      ctx.closePath();
+      ctx.clip();
       planks.forEach((plank) => {
         const isHighlighted = highlightedPlankIds.has(plank.id);
         const isFullLength = !plank.isCut;
@@ -448,6 +456,7 @@ const Canvas: React.FC<CanvasProps> = ({
         ctx.lineWidth = isHighlighted ? 2 : 0.8;
         ctx.strokeRect(plank.x * scale, plank.y * scale, plank.w * scale, plank.h * scale);
       });
+      ctx.restore();
     }
 
     if (points.length > 0) {
@@ -824,7 +833,8 @@ const Canvas: React.FC<CanvasProps> = ({
         >
           {hoverPlank && (
             <>
-              <div className="mb-1 text-[#5F5F5F]">Längd: {Math.round(hoverPlank.w)} mm</div>
+              <div className="text-[#5F5F5F]">Längd: {Math.round(hoverPlank.w)} mm</div>
+              <div className="mb-1 text-[#5F5F5F]">Bredd: {Math.round(hoverPlank.h)} mm</div>
               <div className="text-[#8F6655]">{!hoverPlank.isCut ? 'Fabriksmått' : 'Anpassad'}</div>
             </>
           )}
@@ -838,7 +848,7 @@ const Canvas: React.FC<CanvasProps> = ({
       )}
 
       {/* Floating stats panel */}
-      <div className="pointer-events-auto absolute bottom-5 left-1/2 z-30 -translate-x-1/2">
+      <div className="pointer-events-auto absolute bottom-5 left-1/2 z-30 -translate-x-1/2 hidden">
         <div className="flex items-stretch overflow-hidden rounded-full border border-[#D9D4CF] bg-white shadow-[0_4px_20px_rgba(0,0,0,0.12)]">
           <div className="flex w-[108px] flex-shrink-0 flex-col items-center justify-center py-3">
             <span className="text-[9px] font-medium text-[#9A9A9A] whitespace-nowrap">Area</span>
@@ -1003,9 +1013,12 @@ const Canvas: React.FC<CanvasProps> = ({
                   onZoomExtents();
                   setContextMenu(null);
                 }}
-                className="pf-action-heading w-full px-4 py-2 text-left font-medium text-[#1A1A1A] hover:bg-[#F6F2EF]"
+                className="pf-action-heading w-full px-4 py-2 text-left font-medium text-[#1A1A1A] hover:bg-[#F6F2EF] flex items-center gap-2"
               >
-                Zoom extents
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 flex-shrink-0">
+                  <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
+                </svg>
+                Visa hela
               </button>
             </>
           )}

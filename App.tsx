@@ -19,14 +19,15 @@ import { getPolygonArea, getBoundingBox } from './geometry';
 const INITIAL_SETTINGS: PlankSettings = {
   length: 2000,
   width: 190,
-  minEndPiece: 300,
+  minEndPiece: 50,
   minStagger: 500,
   gap: 5,
   startOffset: 0,
   startOffsetVertical: 0,
   planksPerPackage: 6,
   visualContrast: 0.6,
-  originPointIdx: 0
+  originPointIdx: 0,
+  layoutRotated: false
 };
 
 const DEFAULT_SCALE = 0.08;
@@ -43,6 +44,22 @@ const UNDO_HISTORY_LIMIT = 20;
 
 const PRODUCT_STORAGE_KEY = 'profloor.saved-products';
 const FLOOR_DESIGNS_STORAGE_KEY = 'profloor.floor-designs';
+
+// --- Share URL helpers ---
+function encodeSharePayload(obj: unknown): string {
+  const json = JSON.stringify(obj);
+  const bytes = new TextEncoder().encode(json);
+  let binary = '';
+  bytes.forEach(b => { binary += String.fromCharCode(b); });
+  return btoa(binary);
+}
+
+function decodeSharePayload(encoded: string): unknown {
+  const binary = atob(encoded);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return JSON.parse(new TextDecoder().decode(bytes));
+}
 
 interface FloorDesignState {
   designs: FloorDesign[];
@@ -76,18 +93,75 @@ const asNumber = (value: unknown, fallback: number): number =>
 
 const createDesignId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+interface LayoutOptimizationConstraints {
+  minStaggerMin: number;   // mm — minimum allowed minStagger
+  minStaggerMax: number;   // mm — upper bound (also clamped to length/2)
+  iterations: number;      // number of random samples to evaluate
+  // Future: manufacturer-specific rules (e.g. requiredStaggerStep, maxStartOffset)
+}
+
+const DEFAULT_OPTIMIZATION_CONSTRAINTS: LayoutOptimizationConstraints = {
+  minStaggerMin: 250,
+  minStaggerMax: 500,
+  iterations: 120,
+};
+
+const findOptimizedLayout = (
+  points: Point[],
+  settings: PlankSettings,
+  constraints: LayoutOptimizationConstraints
+): Pick<PlankSettings, 'startOffset' | 'startOffsetVertical' | 'minStagger'> => {
+  const staggerCeiling = Math.min(constraints.minStaggerMax, Math.floor(settings.length / 2));
+  const staggerFloor = Math.min(constraints.minStaggerMin, staggerCeiling);
+  const staggerRange = Math.max(0, staggerCeiling - staggerFloor);
+
+  // Apply the same room-rotation the main layout path uses
+  const effectivePoints = settings.layoutRotated
+    ? points.map((p) => ({ x: p.y, y: -p.x }))
+    : points;
+
+  let bestPlanksOpened = Infinity;
+  let best = {
+    startOffset: settings.startOffset,
+    startOffsetVertical: settings.startOffsetVertical,
+    minStagger: settings.minStagger,
+  };
+
+  for (let i = 0; i < constraints.iterations; i++) {
+    const candidate: PlankSettings = {
+      ...settings,
+      startOffset: Math.round(Math.random() * settings.length),
+      startOffsetVertical: Math.round(Math.random() * settings.width),
+      minStagger: Math.round(staggerFloor + Math.random() * staggerRange),
+    };
+    const { totalPlanksOpened } = calculateLayout(effectivePoints, candidate);
+    if (totalPlanksOpened < bestPlanksOpened) {
+      bestPlanksOpened = totalPlanksOpened;
+      best = {
+        startOffset: candidate.startOffset,
+        startOffsetVertical: candidate.startOffsetVertical,
+        minStagger: candidate.minStagger,
+      };
+    }
+  }
+
+  return best;
+};
+
 const toProductDesignSettings = (settings: PlankSettings): ProductDesignSettings => ({
   minStagger: settings.minStagger,
   startOffset: settings.startOffset,
   startOffsetVertical: settings.startOffsetVertical,
-  minEndPiece: settings.minEndPiece
+  minEndPiece: settings.minEndPiece,
+  layoutRotated: settings.layoutRotated
 });
 
 const getProductDefaults = (product: SavedProduct): ProductDesignSettings => ({
   minStagger: product.minStagger,
   startOffset: product.startOffset,
   startOffsetVertical: product.startOffsetVertical,
-  minEndPiece: product.minEndPiece
+  minEndPiece: product.minEndPiece,
+  layoutRotated: false
 });
 
 const DEFAULT_FLOOR_POINTS: Point[] = [
@@ -138,7 +212,8 @@ const sanitizePlankSettings = (value: unknown): PlankSettings => {
     startOffsetVertical: asNumber(raw.startOffsetVertical, INITIAL_SETTINGS.startOffsetVertical),
     planksPerPackage,
     visualContrast: asNumber(raw.visualContrast, INITIAL_SETTINGS.visualContrast),
-    originPointIdx
+    originPointIdx,
+    layoutRotated: raw.layoutRotated === true
   };
 };
 
@@ -260,7 +335,8 @@ const parseProductDesignSettings = (value: unknown): ProductDesignSettings | nul
     minStagger: value.minStagger,
     startOffset: value.startOffset,
     startOffsetVertical: value.startOffsetVertical,
-    minEndPiece: value.minEndPiece
+    minEndPiece: value.minEndPiece,
+    layoutRotated: value.layoutRotated === true
   };
 };
 
@@ -358,7 +434,7 @@ const loadSavedProducts = (): SavedProduct[] => {
     return parsed
       .map(parseSavedProduct)
       .filter((product): product is SavedProduct => product !== null)
-      .slice(0, 3);
+      .slice(0, 5);
   } catch {
     return [];
   }
@@ -421,7 +497,15 @@ const App: React.FC = () => {
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
   const [importLaunchError, setImportLaunchError] = useState<string | null>(null);
   const [isImportDropActive, setIsImportDropActive] = useState(false);
+  const [shareCopied, setShareCopied] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const [isManualActive, setIsManualActive] = useState(false);
+  const [manualFloorSettings, setManualFloorSettings] = useState({
+    length: INITIAL_SETTINGS.length,
+    width: INITIAL_SETTINGS.width,
+    planksPerPackage: INITIAL_SETTINGS.planksPerPackage,
+    pricePerPackage: 0
+  });
 
   const activeDesign = useMemo(() => {
     return designState.designs.find((design) => design.id === designState.activeDesignId) ?? designState.designs[0];
@@ -439,6 +523,43 @@ const App: React.FC = () => {
   const maxOffset = Math.max(0, settings.length - settings.minEndPiece);
   const maxVerticalOffset = Math.max(0, settings.width);
   const maxMinPiece = Math.max(0, settings.length / 2);
+
+  // Restore shared design from URL hash on mount
+  useEffect(() => {
+    const hash = window.location.hash.slice(1);
+    if (!hash.startsWith('s=')) return;
+    const encoded = hash.slice(2);
+    try {
+      const payload = decodeSharePayload(encoded) as {
+        points?: Point[];
+        settings?: PlankSettings;
+        savedProducts?: SavedProduct[];
+        activeProductId?: string | null;
+        productSettingsById?: Record<string, ProductDesignSettings>;
+      };
+      setDesignState((prev) => ({
+        ...prev,
+        designs: prev.designs.map((d) =>
+          d.id === prev.activeDesignId
+            ? {
+                ...d,
+                ...(payload.points ? { points: payload.points } : {}),
+                ...(payload.settings ? { settings: payload.settings } : {}),
+                ...(payload.activeProductId !== undefined ? { activeProductId: payload.activeProductId } : {}),
+                ...(payload.productSettingsById ? { productSettingsById: payload.productSettingsById } : {}),
+              }
+            : d
+        ),
+      }));
+      if (payload.savedProducts) {
+        setSavedProducts(payload.savedProducts);
+      }
+      history.replaceState(null, '', window.location.pathname);
+    } catch {
+      // Ignore malformed share URLs
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -525,6 +646,26 @@ const App: React.FC = () => {
       ...prev,
       designs: prev.designs.map((design) => (design.id === designId ? updater(design) : design))
     }));
+  };
+
+  const handleShare = async () => {
+    const payload = {
+      points,
+      settings,
+      savedProducts,
+      activeProductId,
+      productSettingsById: activeDesign.productSettingsById,
+    };
+    const encoded = encodeSharePayload(payload);
+    const url = `${window.location.origin}${window.location.pathname}#s=${encoded}`;
+    window.location.hash = `s=${encoded}`;
+    try {
+      await navigator.clipboard.writeText(url);
+    } catch {
+      // Clipboard not available — the hash is still set in the URL bar
+    }
+    setShareCopied(true);
+    setTimeout(() => setShareCopied(false), 2000);
   };
 
   const updateActiveDesign = (updater: (design: FloorDesign) => FloorDesign) => {
@@ -714,7 +855,15 @@ const App: React.FC = () => {
 
   const { planks, wastePieces, totalPlanksOpened } = useMemo(() => {
     if (points.length < 3) return { planks: [], wastePieces: [], totalPlanksOpened: 0 };
-    return calculateLayout(points, settings);
+    if (!settings.layoutRotated) return calculateLayout(points, settings);
+    // Rotate room 90° CW: (x, y) → (y, -x); settings unchanged — room rotation alone
+    // transforms the coordinate space so planks end up running vertically after back-rotation
+    const rotatedPoints = points.map(p => ({ x: p.y, y: -p.x }));
+    const result = calculateLayout(rotatedPoints, settings);
+    // Rotate planks back 90° CCW: rect at (px,py,pw,ph) → (-(py+ph), px, ph, pw)
+    const rotatePlanks = result.planks.map(p => ({ ...p, x: -(p.y + p.h), y: p.x, w: p.h, h: p.w }));
+    const rotateWaste = result.wastePieces.map(w => ({ ...w, x: -(w.y + w.h), y: w.x, w: w.h, h: w.w }));
+    return { ...result, planks: rotatePlanks, wastePieces: rotateWaste };
   }, [points, settings]);
 
   const stats = useMemo<Stats>(() => {
@@ -748,12 +897,12 @@ const App: React.FC = () => {
     };
   }, [points, totalPlanksOpened, settings, productInfo]);
 
-  const productTotalsById = useMemo(() => {
-    const totals: Record<string, number> = {};
+  const productStatsById = useMemo(() => {
+    const statsMap: Record<string, Stats> = {};
 
     savedProducts.forEach((product) => {
       if (points.length < 3) {
-        totals[product.id] = 0;
+        statsMap[product.id] = { area: 0, plankCount: 0, packageCount: 0, wasteArea: 0, wastePercent: 0 };
         return;
       }
 
@@ -773,13 +922,46 @@ const App: React.FC = () => {
 
       const { totalPlanksOpened: productPlanksOpened } = calculateLayout(points, productSettings);
       const packageCount = Math.ceil(productPlanksOpened / product.planksPerPackage);
-      totals[product.id] = packageCount * product.pricePerPackage;
+      const areaMm2 = getPolygonArea(points);
+      const areaM2 = areaMm2 / 1_000_000;
+      const singlePlankAreaM2 = (product.lengthMm * product.widthMm) / 1_000_000;
+      const purchasedPlanks = packageCount * product.planksPerPackage;
+      const purchasedMaterialM2 = purchasedPlanks * singlePlankAreaM2;
+      const wasteArea = Math.max(0, purchasedMaterialM2 - areaM2);
+      const wastePercent = purchasedMaterialM2 > 0 ? (wasteArea / purchasedMaterialM2) * 100 : 0;
+      const totalPrice = packageCount * product.pricePerPackage;
+
+      statsMap[product.id] = { area: areaM2, plankCount: productPlanksOpened, packageCount, wasteArea, wastePercent, totalPrice };
     });
 
-    return totals;
+    return statsMap;
   }, [savedProducts, points, settings, activeDesign.productSettingsById]);
 
+  const manualStats = useMemo((): Stats => {
+    if (points.length < 3 || manualFloorSettings.length <= 0 || manualFloorSettings.width <= 0 || manualFloorSettings.planksPerPackage <= 0) {
+      return { area: 0, plankCount: 0, packageCount: 0, wasteArea: 0, wastePercent: 0 };
+    }
+    const manualSettings: PlankSettings = {
+      ...INITIAL_SETTINGS,
+      length: manualFloorSettings.length,
+      width: manualFloorSettings.width,
+      planksPerPackage: manualFloorSettings.planksPerPackage
+    };
+    const { totalPlanksOpened } = calculateLayout(points, manualSettings);
+    const packageCount = Math.ceil(totalPlanksOpened / manualFloorSettings.planksPerPackage);
+    const areaMm2 = getPolygonArea(points);
+    const areaM2 = areaMm2 / 1_000_000;
+    const singlePlankAreaM2 = (manualFloorSettings.length * manualFloorSettings.width) / 1_000_000;
+    const purchasedPlanks = packageCount * manualFloorSettings.planksPerPackage;
+    const purchasedMaterialM2 = purchasedPlanks * singlePlankAreaM2;
+    const wasteArea = Math.max(0, purchasedMaterialM2 - areaM2);
+    const wastePercent = purchasedMaterialM2 > 0 ? (wasteArea / purchasedMaterialM2) * 100 : 0;
+    const totalPrice = manualFloorSettings.pricePerPackage > 0 ? packageCount * manualFloorSettings.pricePerPackage : undefined;
+    return { area: areaM2, plankCount: totalPlanksOpened, packageCount, wasteArea, wastePercent, totalPrice };
+  }, [manualFloorSettings, points]);
+
   const activateProduct = (product: SavedProduct) => {
+    setIsManualActive(false);
     updateActiveDesign((design) => {
       const existingSettings = design.productSettingsById[product.id] ?? getProductDefaults(product);
       const productSettingsById = design.productSettingsById[product.id]
@@ -811,10 +993,41 @@ const App: React.FC = () => {
           minStagger: existingSettings.minStagger,
           startOffset: existingSettings.startOffset,
           startOffsetVertical: existingSettings.startOffsetVertical,
-          minEndPiece: existingSettings.minEndPiece
+          minEndPiece: existingSettings.minEndPiece,
+          layoutRotated: existingSettings.layoutRotated
         }
       };
     });
+  };
+
+  const activateManual = () => {
+    setIsManualActive(true);
+    updateActiveDesign((design) => ({
+      ...design,
+      activeProductId: null,
+      productInfo: null,
+      settings: {
+        ...design.settings,
+        length: manualFloorSettings.length,
+        width: manualFloorSettings.width,
+        planksPerPackage: manualFloorSettings.planksPerPackage
+      }
+    }));
+  };
+
+  const handleManualSettingsChange = (next: { length: number; width: number; planksPerPackage: number; pricePerPackage: number }) => {
+    setManualFloorSettings(next);
+    if (isManualActive) {
+      updateActiveDesign((design) => ({
+        ...design,
+        settings: {
+          ...design.settings,
+          length: next.length,
+          width: next.width,
+          planksPerPackage: next.planksPerPackage
+        }
+      }));
+    }
   };
 
   const addProduct = (product: SavedProduct) => {
@@ -825,7 +1038,7 @@ const App: React.FC = () => {
       return;
     }
 
-    if (savedProducts.length >= 3) return;
+    if (savedProducts.length >= 5) return;
 
     setSavedProducts((prev) => [product, ...prev]);
     activateProduct(product);
@@ -861,6 +1074,16 @@ const App: React.FC = () => {
 
   const handleSidebarSettingsChange = (nextSettings: PlankSettings) => {
     setActiveSettings(nextSettings);
+  };
+
+  const handleOptimizeLayout = () => {
+    if (points.length < 3) return;
+    const minStaggerMin = settings.length < 1000
+      ? Math.ceil(settings.length * 0.25 / 10) * 10
+      : 250;
+    const constraints = { ...DEFAULT_OPTIMIZATION_CONSTRAINTS, minStaggerMin };
+    const optimized = findOptimizedLayout(points, settings, constraints);
+    setActiveSettings({ ...settings, ...optimized });
   };
 
   const handleReset = () => {
@@ -1280,10 +1503,13 @@ const App: React.FC = () => {
       <div className={`pf-app-shell relative grid h-full min-h-0 w-full ${contentColumns} grid-rows-[auto_minmax(0,1fr)] border border-[#d9d9d9] bg-white text-[#4a4a4a]`}>
         <div className="col-[1/-1] row-[1] z-20 bg-white border-b border-[#d9d9d9]">
           <div className={`grid h-[102px] min-w-0 ${topbarColumns} sm:h-[114px]`}>
-            <div className="flex flex-col justify-center bg-white px-5 py-4 sm:px-6 sm:py-5">
+            <div className="flex flex-col bg-white px-5 pt-5 pb-2 sm:px-6 sm:pt-6">
               <div className="flex items-center gap-2.5">
                 <div className="flex h-8 w-8 items-center justify-center bg-[#C41230] text-white font-bold text-[14px] shrink-0">PF</div>
                 <h1 className="text-[20px] font-semibold leading-none tracking-[-0.01em] text-[#1a1a1a]">ProFloor CAD</h1>
+              </div>
+              <div className="flex-1 flex items-end justify-center">
+                <span className="text-[11px] font-medium text-[#767676]">Valda produkter</span>
               </div>
             </div>
 
@@ -1401,10 +1627,16 @@ const App: React.FC = () => {
               setSettings={handleSidebarSettingsChange}
               savedProducts={savedProducts}
               activeProductId={activeProductId}
-              productTotalsById={productTotalsById}
+              productStatsById={productStatsById}
+              isManualActive={isManualActive}
+              manualFloorSettings={manualFloorSettings}
+              manualStats={manualStats}
+              onActivateManual={activateManual}
+              onManualFloorSettingsChange={handleManualSettingsChange}
               onAddProduct={addProduct}
               onRemoveProduct={removeProduct}
               onSelectProduct={activateProduct}
+              onOptimize={handleOptimizeLayout}
             />
           </div>
 
@@ -1494,6 +1726,26 @@ const App: React.FC = () => {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 4v10m0 0l-4-4m4 4l4-4M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1" />
                   </svg>
                   <span className="whitespace-nowrap">Importera ritning</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleShare}
+                  title="Dela golvdesign"
+                  aria-label="Dela golvdesign"
+                  className="pf-action-heading flex h-8 items-center justify-center gap-1.5 rounded-full border border-[#d9d9d9] bg-white px-3 font-medium text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
+                >
+                  {shareCopied ? (
+                    <svg className="h-3.5 w-3.5 text-[#3D8B37]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                    </svg>
+                  )}
+                  <span className="whitespace-nowrap" style={{ color: shareCopied ? '#3D8B37' : undefined }}>
+                    {shareCopied ? 'Kopierat!' : 'Dela'}
+                  </span>
                 </button>
                 <button
                   type="button"
