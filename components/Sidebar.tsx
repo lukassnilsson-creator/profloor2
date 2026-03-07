@@ -7,6 +7,7 @@ interface SidebarProps {
   setSettings: (s: PlankSettings) => void;
   products: SavedProduct[];
   activeDesignName: string;
+  activeDesignId: string;
   activeProductId: string | null;
   productStatsById: Record<string, Stats>;
   isManualActive: boolean;
@@ -14,7 +15,7 @@ interface SidebarProps {
   manualStats: Stats;
   onActivateManual: () => void;
   onManualFloorSettingsChange: (next: { length: number; width: number; planksPerPackage: number; pricePerPackage: number }) => void;
-  onAddProduct: (product: SavedProduct) => void;
+  onAddProduct: (product: SavedProduct, targetDesignId: string) => void;
   onRemoveProduct: (productId: string) => void;
   onSelectProduct: (product: SavedProduct) => void;
   onOptimize: () => void;
@@ -25,6 +26,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   setSettings,
   products,
   activeDesignName,
+  activeDesignId,
   activeProductId,
   productStatsById,
   isManualActive,
@@ -102,6 +104,10 @@ const Sidebar: React.FC<SidebarProps> = ({
       return;
     }
 
+    // Capture the target design ID before any async work — prevents race condition
+    // if the user switches tabs while the fetch is in progress.
+    const targetDesignId = activeDesignId;
+
     setIsFetching(true);
     setFetchElapsed(0);
     fetchTimerRef.current = window.setInterval(() => {
@@ -139,7 +145,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         minEndPiece: settings.minEndPiece
       };
 
-      onAddProduct(fetchedProduct);
+      onAddProduct(fetchedProduct, targetDesignId);
       setProductUrl('');
 
     } catch (error) {

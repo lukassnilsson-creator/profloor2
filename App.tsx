@@ -1407,6 +1407,7 @@ const App: React.FC = () => {
   const activateProduct = (product: SavedProduct) => {
     setIsManualActive(false);
     updateActiveDesign((design) => {
+      const isNewProduct = !design.productSettingsById[product.id];
       const existingSettings = design.productSettingsById[product.id] ?? getProductDefaults(product);
       const productSettingsById = design.productSettingsById[product.id]
         ? design.productSettingsById
@@ -1414,6 +1415,29 @@ const App: React.FC = () => {
             ...design.productSettingsById,
             [product.id]: existingSettings
           };
+
+      const baseSettings: PlankSettings = {
+        ...design.settings,
+        length: product.lengthMm,
+        width: product.widthMm,
+        planksPerPackage: product.planksPerPackage,
+        minStagger: existingSettings.minStagger,
+        startOffset: existingSettings.startOffset,
+        startOffsetVertical: existingSettings.startOffsetVertical,
+        minEndPiece: existingSettings.minEndPiece,
+        layoutRotated: existingSettings.layoutRotated
+      };
+
+      // Auto-optimize waste for freshly added products (no saved layout settings yet)
+      let finalSettings = baseSettings;
+      if (isNewProduct && design.points.length >= 3) {
+        const minStaggerMin = baseSettings.length < 1000
+          ? Math.ceil(baseSettings.length * 0.25 / 10) * 10
+          : 250;
+        const constraints = { ...DEFAULT_OPTIMIZATION_CONSTRAINTS, minStaggerMin };
+        const optimized = findOptimizedLayout(design.points, baseSettings, constraints);
+        finalSettings = { ...baseSettings, ...optimized };
+      }
 
       return {
         ...design,
@@ -1429,17 +1453,7 @@ const App: React.FC = () => {
           imageUrl: product.imageUrl
         },
         productSettingsById,
-        settings: {
-          ...design.settings,
-          length: product.lengthMm,
-          width: product.widthMm,
-          planksPerPackage: product.planksPerPackage,
-          minStagger: existingSettings.minStagger,
-          startOffset: existingSettings.startOffset,
-          startOffsetVertical: existingSettings.startOffsetVertical,
-          minEndPiece: existingSettings.minEndPiece,
-          layoutRotated: existingSettings.layoutRotated
-        }
+        settings: finalSettings,
       };
     });
   };
@@ -1477,20 +1491,36 @@ const App: React.FC = () => {
     }
   };
 
-  const addProduct = (product: SavedProduct) => {
-    const normalizedIncomingUrl = product.url.trim();
-    const duplicate = activeDesign.products.find((existing) => existing.url.trim() === normalizedIncomingUrl);
-    if (duplicate) {
-      activateProduct(duplicate);
-      return;
-    }
-
-    if (activeDesign.products.length >= 5) return;
-
+  const addProduct = (product: SavedProduct, targetDesignId: string) => {
     // Stamp lastRefreshedAt so background refresh doesn't re-fetch immediately
     const stamped: SavedProduct = { ...product, lastRefreshedAt: new Date().toISOString() };
-    updateActiveDesign((design) => ({ ...design, products: [stamped, ...design.products] }));
-    activateProduct(stamped);
+
+    if (targetDesignId === activeDesign.id) {
+      // Happy path: user is still on the same tab — add + activate as before
+      const normalizedIncomingUrl = stamped.url.trim();
+      const duplicate = activeDesign.products.find((existing) => existing.url.trim() === normalizedIncomingUrl);
+      if (duplicate) {
+        activateProduct(duplicate);
+        return;
+      }
+      if (activeDesign.products.length >= 5) return;
+      updateActiveDesign((design) => ({ ...design, products: [stamped, ...design.products] }));
+      activateProduct(stamped);
+    } else {
+      // User switched tabs during the fetch — add the product silently to the original tab
+      setDesignState((prev) => {
+        const target = prev.designs.find((d) => d.id === targetDesignId);
+        if (!target) return prev;
+        if (target.products.length >= 5) return prev;
+        if (target.products.some((p) => p.url.trim() === stamped.url.trim())) return prev;
+        return {
+          ...prev,
+          designs: prev.designs.map((d) =>
+            d.id === targetDesignId ? { ...d, products: [stamped, ...d.products] } : d
+          ),
+        };
+      });
+    }
   };
 
   const removeProduct = (productId: string) => {
@@ -2045,6 +2075,7 @@ const App: React.FC = () => {
               setSettings={handleSidebarSettingsChange}
               products={activeDesign.products}
               activeDesignName={activeDesign.name}
+              activeDesignId={activeDesign.id}
               activeProductId={activeProductId}
               productStatsById={productStatsById}
               isManualActive={effectiveIsManualActive}

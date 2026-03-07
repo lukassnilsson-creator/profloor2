@@ -44,14 +44,35 @@ const fetchHtml = async (url: string): Promise<string | null> => {
   try {
     const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'sv-SE,sv;q=0.9,en;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'sv-SE,sv;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'sec-ch-ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
+        'sec-fetch-dest': 'document',
+        'sec-fetch-mode': 'navigate',
+        'sec-fetch-site': 'none',
+        'sec-fetch-user': '?1',
+        'Upgrade-Insecure-Requests': '1',
       },
       redirect: 'follow',
     });
     if (!res.ok) return null;
-    return await res.text();
+    const text = await res.text();
+    // Detect Cloudflare/bot challenge pages — they have no useful product data
+    if (
+      text.includes('cf-browser-verification') ||
+      text.includes('challenge-platform') ||
+      text.includes('__cf_chl') ||
+      (text.length < 5000 && text.includes('Checking your browser'))
+    ) {
+      return null;
+    }
+    return text;
   } catch {
     return null;
   }
@@ -289,6 +310,14 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           isCampaignPrice: typeof dimensions.isCampaignPrice === 'boolean' ? dimensions.isCampaignPrice : false,
           imageUrl: imageUrl ?? undefined,
         };
+
+        // Quality gate: if key fields are missing the page was likely blocked/challenged.
+        // Fall through to the Gemini googleSearch path which doesn't hit the site directly.
+        const hasPrice = typeof result.pricePerPackage === 'number' && result.pricePerPackage > 0;
+        const hasDimensions = result.lengthMm > 0 && result.widthMm > 0;
+        if (!hasPrice || !hasDimensions) {
+          throw new Error('Fast path returned incomplete data');
+        }
 
         return res.status(200).json(result);
       } catch (fastErr) {
