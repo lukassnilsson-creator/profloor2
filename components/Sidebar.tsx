@@ -5,7 +5,8 @@ import { PlankSettings, SavedProduct, Stats } from '../types';
 interface SidebarProps {
   settings: PlankSettings;
   setSettings: (s: PlankSettings) => void;
-  savedProducts: SavedProduct[];
+  products: SavedProduct[];
+  activeDesignName: string;
   activeProductId: string | null;
   productStatsById: Record<string, Stats>;
   isManualActive: boolean;
@@ -22,7 +23,8 @@ interface SidebarProps {
 const Sidebar: React.FC<SidebarProps> = ({
   settings,
   setSettings,
-  savedProducts,
+  products,
+  activeDesignName,
   activeProductId,
   productStatsById,
   isManualActive,
@@ -75,20 +77,9 @@ const Sidebar: React.FC<SidebarProps> = ({
     }, 650);
   };
 
-  const handleChange = (key: keyof PlankSettings, val: string | number) => {
-    let num = typeof val === 'string' ? parseFloat(val) : val;
-    if (isNaN(num) && val !== '') return;
-    const finalVal = val === '' ? 0 : num;
-    if (key === 'planksPerPackage') {
-      setSettings({ ...settings, [key]: Math.max(1, Math.round(finalVal)) });
-    } else {
-      setSettings({ ...settings, [key]: finalVal });
-    }
-  };
-
   const fetchProductData = async () => {
     const rawUrl = productUrl.trim();
-    if (!rawUrl || savedProducts.length >= 5) return;
+    if (!rawUrl || products.length >= 5) return;
 
     setProductError(null);
     let normalizedUrl = rawUrl;
@@ -103,7 +94,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       return;
     }
 
-    const duplicate = savedProducts.find((product) => product.url.trim() === normalizedUrl);
+    const duplicate = products.find((product) => product.url.trim() === normalizedUrl);
     if (duplicate) {
       onSelectProduct(duplicate);
       setProductUrl('');
@@ -164,7 +155,7 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
-  const isProductLimitReached = savedProducts.length >= 5;
+  const isProductLimitReached = products.length >= 5;
   const getPricePerSquareMeter = (product: SavedProduct) => {
     const packageAreaM2 = (product.lengthMm * product.widthMm * product.planksPerPackage) / 1_000_000;
     if (!Number.isFinite(packageAreaM2) || packageAreaM2 <= 0) {
@@ -194,7 +185,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <div className="h-full min-h-0 w-full flex flex-col bg-white">
-      <div className="flex-shrink-0 px-5 pt-4 pb-4 space-y-2.5 border-b border-[#d9d9d9] bg-white">
+      <div className="flex-shrink-0 px-5 pt-4 pb-4 space-y-2.5 bg-white">
         <input
           type="text"
           placeholder={isProductLimitReached ? 'Max 5 produkter samtidigt' : 'Klistra in länk till golv...'}
@@ -219,6 +210,11 @@ const Sidebar: React.FC<SidebarProps> = ({
           <p className="text-[9px] text-[#C41230] leading-relaxed">{productError}</p>
         )}
       </div>
+      <div className="flex-shrink-0 px-5 pt-4 pb-2 bg-white">
+        <h2 className="text-[13px] font-semibold text-[#1a1a1a] leading-tight">
+          Valda produkter för: <span className="text-[#767676] font-medium">{activeDesignName}</span>
+        </h2>
+      </div>
     <div
       data-scrolling={isSidebarScrolling ? 'true' : 'false'}
       onScroll={handleSidebarScroll}
@@ -228,7 +224,7 @@ const Sidebar: React.FC<SidebarProps> = ({
 
         <section className="space-y-0">
 
-          {(isFetching || savedProducts.length > 0) && (
+          {(isFetching || products.length > 0) && (
             <div className="border-t border-[#d9d9d9]">
               {isFetching && (
                 <div className="w-full border-b border-[#d9d9d9]">
@@ -242,7 +238,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   </div>
                 </div>
               )}
-              {savedProducts.map((product) => {
+              {products.map((product) => {
                 const productStats = productStatsById[product.id] ?? { area: 0, plankCount: 0, packageCount: 0, wasteArea: 0, wastePercent: 0 };
                 const isActive = activeProductId === product.id;
                 const pricePerSquareMeter = getPricePerSquareMeter(product);
@@ -288,8 +284,9 @@ const Sidebar: React.FC<SidebarProps> = ({
                       />
                       <div className="flex-1 min-w-0 space-y-1">
                         <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
                           <p
-                            className={`min-w-0 text-[10px] font-semibold leading-snug ${isActive ? 'text-[#1a1a1a]' : 'text-[#1a1a1a]'}`}
+                            className="text-[10px] font-semibold leading-snug text-[#1a1a1a]"
                             style={{
                               display: '-webkit-box',
                               WebkitLineClamp: 2,
@@ -299,13 +296,22 @@ const Sidebar: React.FC<SidebarProps> = ({
                           >
                             {product.name}
                           </p>
+                          {product.isBrokenLink && (
+                            <div className="flex items-center gap-1 mt-1">
+                              <svg className="h-3 w-3 text-[#C41230] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+                              </svg>
+                              <span className="text-[9px] text-[#C41230]">Produkten hittades inte längre</span>
+                            </div>
+                          )}
+                          </div>
                           <button
                             type="button"
                             onClick={(e) => {
                               e.stopPropagation();
                               onRemoveProduct(product.id);
                             }}
-                            className="flex-shrink-0 inline-flex h-5 w-5 items-center justify-center text-[14px] leading-none text-[#767676] hover:text-[#1a1a1a]"
+                            className="flex-shrink-0 inline-flex h-5 w-5 items-center justify-center text-[14px] leading-none text-[#767676] hover:text-[#1a1a1a] self-start"
                             aria-label={`Ta bort ${product.name}`}
                           >
                             ×

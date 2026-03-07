@@ -32,6 +32,8 @@ export interface SavedProduct {
   startOffset: number;
   startOffsetVertical: number;
   minEndPiece: number;
+  lastRefreshedAt?: string; // ISO date — when price/stock was last refreshed
+  isBrokenLink?: boolean;   // true if the product URL returned 404
 }
 
 export interface ProductDesignSettings {
@@ -63,9 +65,10 @@ export interface FloorDesign {
   savedStateKey?: string;   // JSON snapshot of key state at last save, used to detect unsaved changes
   points: Point[];
   settings: PlankSettings;
+  products: SavedProduct[]; // Per-design product list (max 5)
   productSettingsById: Record<string, ProductDesignSettings>;
   activeProductId: string | null;
-  productInfo: ProductInfo | null;
+  productInfo: ProductInfo | null; // Used by embedded canvas module
   scale: number;
   offset: { x: number; y: number };
   backgroundDrawing: ImportedDrawingBackground | null;
