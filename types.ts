@@ -59,6 +59,8 @@ export interface PlankSettings {
 export interface FloorDesign {
   id: string;
   name: string;
+  savedFloorId?: string;    // Supabase saved_floors row ID, set after first save
+  savedStateKey?: string;   // JSON snapshot of key state at last save, used to detect unsaved changes
   points: Point[];
   settings: PlankSettings;
   productSettingsById: Record<string, ProductDesignSettings>;

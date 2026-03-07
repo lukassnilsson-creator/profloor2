@@ -15,6 +15,8 @@ import {
 } from './types';
 import { calculateLayout } from './flooringEngine';
 import { getPolygonArea, getBoundingBox } from './geometry';
+import { supabase } from './lib/supabase';
+import type { User } from '@supabase/supabase-js';
 
 const INITIAL_SETTINGS: PlankSettings = {
   length: 2000,
@@ -170,6 +172,23 @@ const DEFAULT_FLOOR_POINTS: Point[] = [
   { x: 2000, y: 1500 },
   { x: -2000, y: 1500 }
 ];
+
+const getDesignStateKey = (design: Pick<FloorDesign, 'points' | 'settings' | 'activeProductId' | 'productSettingsById'>): string =>
+  JSON.stringify({ points: design.points, settings: design.settings, activeProductId: design.activeProductId, productSettingsById: design.productSettingsById });
+
+const DEFAULT_STATE_KEY = getDesignStateKey({
+  points: DEFAULT_FLOOR_POINTS,
+  settings: INITIAL_SETTINGS,
+  activeProductId: null,
+  productSettingsById: {},
+});
+
+const isDesignDirty = (design: FloorDesign): boolean => {
+  const current = getDesignStateKey(design);
+  if (design.savedStateKey) return design.savedStateKey !== current;
+  // Never saved: dirty only if meaningfully changed from blank default
+  return current !== DEFAULT_STATE_KEY;
+};
 
 const createDefaultDesign = (name: string): FloorDesign => ({
   id: createDesignId(),
@@ -490,14 +509,34 @@ const App: React.FC = () => {
   const [savedProducts, setSavedProducts] = useState<SavedProduct[]>(loadSavedProducts);
   const [editingDesignId, setEditingDesignId] = useState<string | null>(null);
   const [editingDesignName, setEditingDesignName] = useState('');
+  const [tabNameError, setTabNameError] = useState(false);
+  const [renamingFloorId, setRenamingFloorId] = useState<string | null>(null);
+  const [renamingFloorName, setRenamingFloorName] = useState('');
   const [zoomPercentInput, setZoomPercentInput] = useState(() => String(Math.round(DEFAULT_SCALE * 1000)));
   const [historyByDesignId, setHistoryByDesignId] = useState<Record<string, DesignHistorySnapshot[]>>({});
   const [redoByDesignId, setRedoByDesignId] = useState<Record<string, DesignHistorySnapshot[]>>({});
   const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
+  const [user, setUser] = useState<User | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setUser(session?.user ?? null);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, []);
   const [importLaunchError, setImportLaunchError] = useState<string | null>(null);
   const [isImportDropActive, setIsImportDropActive] = useState(false);
   const [shareCopied, setShareCopied] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveDone, setSaveDone] = useState(false);
+  const [showSavedFloors, setShowSavedFloors] = useState(false);
+  const [savedFloorsList, setSavedFloorsList] = useState<Array<{ id: string; name: string; updated_at: string; summary?: { areaMm2?: number; wastePercent?: number; packageCount?: number; totalPrice?: number | null; currency?: string | null; productName?: string | null } | null; thumbnail?: string | null }>>([]);
+  const [savedFloorsLoading, setSavedFloorsLoading] = useState(false);
+  const [pendingCloseDesignId, setPendingCloseDesignId] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const [isManualActive, setIsManualActive] = useState(false);
   const [manualFloorSettings, setManualFloorSettings] = useState({
@@ -520,7 +559,46 @@ const App: React.FC = () => {
   const backgroundDrawing = activeDesign.backgroundDrawing;
   const showBackgroundDrawing = activeDesign.showBackgroundDrawing;
   const backgroundOpacity = activeDesign.backgroundOpacity;
-  // Restore shared design from URL hash on mount
+  // Restore shared design from Supabase (?shared=<uuid>) on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sharedId = params.get('shared');
+    if (!sharedId) return;
+    supabase
+      .from('shared_floors')
+      .select('floor_data')
+      .eq('id', sharedId)
+      .single()
+      .then(({ data, error }) => {
+        if (error || !data?.floor_data) return;
+        const payload = data.floor_data as {
+          points?: Point[];
+          settings?: PlankSettings;
+          savedProducts?: SavedProduct[];
+          activeProductId?: string | null;
+          productSettingsById?: Record<string, ProductDesignSettings>;
+        };
+        setDesignState((prev) => ({
+          ...prev,
+          designs: prev.designs.map((d) =>
+            d.id === prev.activeDesignId
+              ? {
+                  ...d,
+                  ...(payload.points ? { points: payload.points } : {}),
+                  ...(payload.settings ? { settings: payload.settings } : {}),
+                  ...(payload.activeProductId !== undefined ? { activeProductId: payload.activeProductId } : {}),
+                  ...(payload.productSettingsById ? { productSettingsById: payload.productSettingsById } : {}),
+                }
+              : d
+          ),
+        }));
+        if (payload.savedProducts) setSavedProducts(payload.savedProducts);
+        history.replaceState(null, '', window.location.pathname);
+      });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Restore shared design from URL hash on mount (legacy fallback)
   useEffect(() => {
     const hash = window.location.hash.slice(1);
     if (!hash.startsWith('s=')) return;
@@ -652,16 +730,169 @@ const App: React.FC = () => {
       activeProductId,
       productSettingsById: activeDesign.productSettingsById,
     };
-    const encoded = encodeSharePayload(payload);
-    const url = `${window.location.origin}${window.location.pathname}#s=${encoded}`;
-    window.location.hash = `s=${encoded}`;
+    let url: string;
+    try {
+      const { data, error } = await supabase
+        .from('shared_floors')
+        .insert({ floor_data: payload, created_by: user?.id ?? null })
+        .select('id')
+        .single();
+      if (error || !data) throw error;
+      url = `${window.location.origin}${window.location.pathname}?shared=${data.id}`;
+    } catch {
+      // Fallback: use URL hash with minimal payload (no savedProducts to keep it shorter)
+      const minimalPayload = { points, settings, activeProductId, productSettingsById: activeDesign.productSettingsById };
+      const encoded = encodeSharePayload(minimalPayload);
+      url = `${window.location.origin}${window.location.pathname}#s=${encoded}`;
+      window.location.hash = `s=${encoded}`;
+    }
     try {
       await navigator.clipboard.writeText(url);
     } catch {
-      // Clipboard not available — the hash is still set in the URL bar
+      // Clipboard not available
     }
     setShareCopied(true);
     setTimeout(() => setShareCopied(false), 2000);
+  };
+
+  const generateFloorThumbnail = (pts: Point[], planksData: typeof planks, plankSettings: PlankSettings): string => {
+    const W = 240;
+    const H = 160;
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d');
+    if (!ctx || pts.length < 3) return '';
+
+    const xs = pts.map((p) => p.x);
+    const ys = pts.map((p) => p.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs);
+    const minY = Math.min(...ys), maxY = Math.max(...ys);
+    const floorW = maxX - minX, floorH = maxY - minY;
+    if (floorW === 0 || floorH === 0) return '';
+
+    // 15% extra padding so there's breathing room around the floor
+    const pad = 22;
+    const baseScale = Math.min((W - pad * 2) / floorW, (H - pad * 2) / floorH);
+    const scale = baseScale * 0.85;
+    const drawW = floorW * scale, drawH = floorH * scale;
+    const ox = (W - drawW) / 2 - minX * scale;
+    const oy = (H - drawH) / 2 - minY * scale;
+    const tx = (x: number) => x * scale + ox;
+    const ty = (y: number) => y * scale + oy;
+
+    // Same background as canvas
+    ctx.fillStyle = '#FCFBFA';
+    ctx.fillRect(0, 0, W, H);
+
+    // Floor fill + clip — same neutral as canvas background (planks paint over it)
+    ctx.beginPath();
+    pts.forEach((p, i) => (i === 0 ? ctx.moveTo(tx(p.x), ty(p.y)) : ctx.lineTo(tx(p.x), ty(p.y))));
+    ctx.closePath();
+    ctx.fillStyle = '#F5F2EF';
+    ctx.fill();
+    ctx.save();
+    ctx.clip();
+
+    // Draw planks with same color logic as Canvas.tsx
+    const contrast = plankSettings.visualContrast;
+    const fc = { r: 210, g: 183, b: 172 }; // factoryColor
+    const cc = { r: 245, g: 241, b: 239 }; // cutColorBase
+    planksData.forEach((plank) => {
+      if (!plank.isCut) {
+        ctx.fillStyle = `rgba(${fc.r}, ${fc.g}, ${fc.b}, ${0.45 + contrast * 0.45})`;
+      } else {
+        const r = fc.r + (cc.r - fc.r) * contrast;
+        const g = fc.g + (cc.g - fc.g) * contrast;
+        const b = fc.b + (cc.b - fc.b) * contrast;
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.38 - contrast * 0.14})`;
+      }
+      ctx.fillRect(tx(plank.x), ty(plank.y), plank.w * scale, plank.h * scale);
+      ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+      ctx.lineWidth = 0.8;
+      ctx.strokeRect(tx(plank.x), ty(plank.y), plank.w * scale, plank.h * scale);
+    });
+
+    ctx.restore();
+
+    // Floor outline
+    ctx.beginPath();
+    pts.forEach((p, i) => (i === 0 ? ctx.moveTo(tx(p.x), ty(p.y)) : ctx.lineTo(tx(p.x), ty(p.y))));
+    ctx.closePath();
+    ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    return canvas.toDataURL('image/png');
+  };
+
+  const buildSavePayload = (design: FloorDesign, allProducts: SavedProduct[], currentStats?: Stats, thumbnail?: string) => ({
+    points: design.points,
+    settings: design.settings,
+    activeProductId: design.activeProductId,
+    productSettingsById: design.productSettingsById,
+    activeProduct: allProducts.find((p) => p.id === design.activeProductId) ?? null,
+    summary: currentStats ? {
+      areaMm2: currentStats.area,
+      wastePercent: Math.round(currentStats.wastePercent * 10) / 10,
+      packageCount: currentStats.packageCount,
+      totalPrice: currentStats.totalPrice ?? null,
+      currency: allProducts.find((p) => p.id === design.activeProductId)?.currency ?? null,
+      productName: allProducts.find((p) => p.id === design.activeProductId)?.name ?? null,
+    } : undefined,
+    thumbnail: thumbnail || undefined,
+  });
+
+  const handleSave = async () => {
+    if (!user || isSaving) return;
+    setIsSaving(true);
+    const thumbnail = generateFloorThumbnail(activeDesign.points, planks, settings);
+    const payload = buildSavePayload(activeDesign, savedProducts, stats, thumbnail);
+    const stateKey = getDesignStateKey(activeDesign);
+    try {
+      // Check for a different saved floor with the same name
+      const nameQuery = supabase
+        .from('saved_floors')
+        .select('id')
+        .eq('user_id', user.id)
+        .eq('name', activeDesign.name);
+      if (activeDesign.savedFloorId) nameQuery.neq('id', activeDesign.savedFloorId);
+      const { data: conflict } = await nameQuery.maybeSingle();
+
+      if (conflict) {
+        const overwrite = window.confirm(
+          `Det finns redan ett sparat golv med namnet "${activeDesign.name}".\nVill du ersätta det?`
+        );
+        if (!overwrite) { setIsSaving(false); return; }
+        // Delete the conflicting row before saving
+        await supabase.from('saved_floors').delete().eq('id', conflict.id).eq('user_id', user.id);
+        setSavedFloorsList((prev) => prev.filter((f) => f.id !== conflict.id));
+      }
+
+      if (activeDesign.savedFloorId) {
+        await supabase
+          .from('saved_floors')
+          .update({ name: activeDesign.name, data: payload, updated_at: new Date().toISOString() })
+          .eq('id', activeDesign.savedFloorId)
+          .eq('user_id', user.id);
+        updateActiveDesign((d) => ({ ...d, savedStateKey: stateKey }));
+      } else {
+        const { data } = await supabase
+          .from('saved_floors')
+          .insert({ user_id: user.id, name: activeDesign.name, data: payload })
+          .select('id')
+          .single();
+        if (data) {
+          updateActiveDesign((d) => ({ ...d, savedFloorId: data.id, savedStateKey: stateKey }));
+        }
+      }
+      setSaveDone(true);
+      setTimeout(() => setSaveDone(false), 2500);
+    } catch {
+      // Save failed silently
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const updateActiveDesign = (updater: (design: FloorDesign) => FloorDesign) => {
@@ -669,6 +900,137 @@ const App: React.FC = () => {
       ...prev,
       designs: prev.designs.map((design) => (design.id === prev.activeDesignId ? updater(design) : design))
     }));
+  };
+
+  const loadSavedFloors = async () => {
+    if (!user) return;
+    setSavedFloorsLoading(true);
+    const { data } = await supabase
+      .from('saved_floors')
+      .select('id, name, updated_at, data->summary, data->thumbnail')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false });
+    if (data) setSavedFloorsList(data as typeof savedFloorsList);
+    setSavedFloorsLoading(false);
+  };
+
+  const handleLoadSavedFloor = async (entry: { id: string; name: string }) => {
+    if (designState.designs.length >= MAX_DESIGNS) {
+      alert(`Stäng ett golv innan du öppnar ett nytt (max ${MAX_DESIGNS} flikar).`);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('saved_floors')
+      .select('data')
+      .eq('id', entry.id)
+      .single();
+    if (error || !data?.data) return;
+
+    const payload = data.data as {
+      points?: Point[];
+      settings?: PlankSettings;
+      activeProductId?: string | null;
+      productSettingsById?: Record<string, ProductDesignSettings>;
+      activeProduct?: SavedProduct | null;
+      savedProducts?: SavedProduct[]; // legacy
+    };
+
+    // Determine which product to load
+    const productToLoad =
+      payload.activeProduct ??
+      (payload.savedProducts?.find((p) => p.id === payload.activeProductId) ?? null);
+
+    if (productToLoad) {
+      const alreadyExists = savedProducts.some((p) => p.url.trim() === productToLoad.url.trim());
+      if (!alreadyExists) {
+        if (savedProducts.length >= 5) {
+          alert('Du har redan 5 produkter. Ta bort en produkt för att öppna detta golv.');
+          return;
+        }
+        setSavedProducts((prev) => [productToLoad, ...prev]);
+      }
+    }
+
+    const newPoints = payload.points ?? DEFAULT_FLOOR_POINTS.map((p) => ({ ...p }));
+    const newSettings = payload.settings ?? { ...INITIAL_SETTINGS };
+    const newActiveProductId = payload.activeProductId ?? null;
+    const newProductSettingsById = payload.productSettingsById ?? {};
+
+    const stateKey = getDesignStateKey({
+      points: newPoints,
+      settings: newSettings,
+      activeProductId: newActiveProductId,
+      productSettingsById: newProductSettingsById,
+    });
+
+    // Auto-suffix tab name if a tab with that name already exists
+    let tabName = entry.name;
+    const existingTabNames = new Set(designState.designs.map((d) => d.name.trim().toLowerCase()));
+    if (existingTabNames.has(tabName.trim().toLowerCase())) {
+      let suffix = 2;
+      while (existingTabNames.has(`${tabName} (${suffix})`.toLowerCase())) suffix++;
+      tabName = `${tabName} (${suffix})`;
+    }
+
+    const newDesign: FloorDesign = {
+      ...createDefaultDesign(tabName),
+      savedFloorId: entry.id,
+      savedStateKey: stateKey,
+      points: newPoints,
+      settings: newSettings,
+      activeProductId: newActiveProductId,
+      productSettingsById: newProductSettingsById,
+    };
+
+    setDesignState((prev) => ({ designs: [...prev.designs, newDesign], activeDesignId: newDesign.id }));
+    setShowSavedFloors(false);
+  };
+
+  const handleDeleteSavedFloor = async (savedFloorId: string) => {
+    if (!user) return;
+    if (!window.confirm('Ta bort det sparade golvet permanent?')) return;
+    await supabase.from('saved_floors').delete().eq('id', savedFloorId).eq('user_id', user.id);
+    setSavedFloorsList((prev) => prev.filter((f) => f.id !== savedFloorId));
+  };
+
+  const handleRenameFloor = async (id: string, newName: string) => {
+    if (!user) return;
+    const trimmed = newName.trim();
+    if (!trimmed) { setRenamingFloorId(null); return; }
+    // Block duplicate names
+    if (savedFloorsList.some((f) => f.id !== id && f.name.trim().toLowerCase() === trimmed.toLowerCase())) {
+      alert(`Det finns redan ett sparat golv med namnet "${trimmed}".`);
+      return;
+    }
+    await supabase.from('saved_floors').update({ name: trimmed }).eq('id', id).eq('user_id', user.id);
+    setSavedFloorsList((prev) => prev.map((f) => f.id === id ? { ...f, name: trimmed } : f));
+    // Also update the name on any open tab with this savedFloorId
+    setDesignState((prev) => ({
+      ...prev,
+      designs: prev.designs.map((d) => d.savedFloorId === id ? { ...d, name: trimmed } : d),
+    }));
+    setRenamingFloorId(null);
+  };
+
+  // Performs the actual removal of a design tab (no guards)
+  const closeDesign = (designId: string) => {
+    if (editingDesignId === designId) {
+      setEditingDesignId(null);
+      setEditingDesignName('');
+    }
+    if (tabContextMenu?.designId === designId) setTabContextMenu(null);
+    setPendingCloseDesignId(null);
+    setDesignState((prev) => {
+      if (prev.designs.length <= 1) return prev;
+      const removeIdx = prev.designs.findIndex((d) => d.id === designId);
+      if (removeIdx === -1) return prev;
+      const nextDesigns = prev.designs.filter((d) => d.id !== designId);
+      const nextActiveId =
+        prev.activeDesignId === designId
+          ? (nextDesigns[removeIdx] ?? nextDesigns[removeIdx - 1] ?? nextDesigns[0]).id
+          : prev.activeDesignId;
+      return { designs: nextDesigns, activeDesignId: nextActiveId };
+    });
   };
 
   const pushHistorySnapshot = useCallback((designId: string, snapshot: DesignHistorySnapshot) => {
@@ -1173,32 +1535,14 @@ const App: React.FC = () => {
 
   const handleRemoveDesign = (designId: string) => {
     if (designState.designs.length <= 1) return;
-    if (!window.confirm('Ta bort detta golv?')) return;
-    if (editingDesignId === designId) {
-      setEditingDesignId(null);
-      setEditingDesignName('');
+    const design = designState.designs.find((d) => d.id === designId);
+    if (!design) return;
+    // If logged in and design has unsaved changes, show save-prompt dialog
+    if (user && isDesignDirty(design)) {
+      setPendingCloseDesignId(designId);
+      return;
     }
-    if (tabContextMenu?.designId === designId) {
-      setTabContextMenu(null);
-    }
-
-    setDesignState((prev) => {
-      if (prev.designs.length <= 1) return prev;
-
-      const removeIdx = prev.designs.findIndex((design) => design.id === designId);
-      if (removeIdx === -1) return prev;
-
-      const nextDesigns = prev.designs.filter((design) => design.id !== designId);
-      const nextActiveDesignId =
-        prev.activeDesignId === designId
-          ? (nextDesigns[removeIdx] ?? nextDesigns[removeIdx - 1] ?? nextDesigns[0]).id
-          : prev.activeDesignId;
-
-      return {
-        designs: nextDesigns,
-        activeDesignId: nextActiveDesignId
-      };
-    });
+    closeDesign(designId);
   };
 
   const getDesignName = (design: FloorDesign, index: number): string => {
@@ -1226,10 +1570,18 @@ const App: React.FC = () => {
   const saveDesignNameEdit = (design: FloorDesign, index: number) => {
     const fallbackName = getDesignName(design, index).slice(0, MAX_DESIGN_NAME_LENGTH);
     const nextName = editingDesignName.trim().slice(0, MAX_DESIGN_NAME_LENGTH);
-    updateDesignById(design.id, (currentDesign) => ({
-      ...currentDesign,
-      name: nextName || fallbackName
-    }));
+    const resolvedName = nextName || fallbackName;
+    const duplicate = designState.designs.some(
+      (d) => d.id !== design.id && d.name.trim().toLowerCase() === resolvedName.toLowerCase()
+    );
+    if (duplicate) {
+      setTabNameError(true);
+      setTimeout(() => setTabNameError(false), 2000);
+      // Revert to original name
+      cancelDesignNameEdit();
+      return;
+    }
+    updateDesignById(design.id, (currentDesign) => ({ ...currentDesign, name: resolvedName }));
     cancelDesignNameEdit();
   };
 
@@ -1437,11 +1789,43 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            <div className="flex min-w-0 flex-col justify-end">
-              <div className="pf-hide-scrollbar min-w-0 overflow-x-auto pl-0 pr-3 sm:pr-6 h-full">
+            <div className="flex min-w-0 flex-col">
+              {/* Login button — top right of topbar */}
+              <div className="flex items-center justify-end pr-3 sm:pr-6 pt-4 sm:pt-5 shrink-0">
+                {user ? (
+                  <div className="flex items-center gap-2">
+                    {user.user_metadata?.avatar_url && (
+                      <img src={user.user_metadata.avatar_url} alt={user.user_metadata?.full_name ?? 'Profilbild'} className="h-6 w-6 rounded-full object-cover" referrerPolicy="no-referrer" />
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => supabase.auth.signOut()}
+                      className="pf-action-heading text-[9px] font-medium text-[#767676] hover:text-[#1a1a1a] transition-colors"
+                    >
+                      Logga ut
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } })}
+                    className="pf-action-heading flex items-center gap-1.5 rounded-full border border-[#d9d9d9] bg-white px-3 py-1 text-[9px] font-semibold text-[#333333] transition-colors hover:bg-[#f0f0f0]"
+                  >
+                    <svg className="h-3 w-3 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
+                      <path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/>
+                      <path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/>
+                      <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l3.66-2.84z" fill="#FBBC05"/>
+                      <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
+                    </svg>
+                    Logga in med Google
+                  </button>
+                )}
+              </div>
+              {/* Tabs row */}
+              <div className="pf-hide-scrollbar min-w-0 overflow-x-auto pl-0 pr-3 sm:pr-6 flex-1 flex items-end">
                 <div className="flex min-w-max items-stretch gap-0 pr-2 h-full">
                   {designState.designs.map((design, index) => {
-                    const isActive = design.id === designState.activeDesignId;
+                    const isActive = design.id === designState.activeDesignId && !showSavedFloors;
                     const canRemove = designState.designs.length > 1;
                     const isEditing = design.id === editingDesignId;
                     const displayName = getDesignName(design, index);
@@ -1456,6 +1840,7 @@ const App: React.FC = () => {
                           onClick={() => {
                             setDesignState((prev) => ({ ...prev, activeDesignId: design.id }));
                             setTabContextMenu(null);
+                            setShowSavedFloors(false);
                           }}
                           onContextMenu={(event) => {
                             event.preventDefault();
@@ -1469,26 +1854,33 @@ const App: React.FC = () => {
                           }`}
                         >
                           {isEditing ? (
-                            <input
-                              autoFocus
-                              value={editingDesignName}
-                              maxLength={MAX_DESIGN_NAME_LENGTH}
-                              onFocus={(event) => event.currentTarget.select()}
-                              onChange={(event) => setEditingDesignName(event.target.value.slice(0, MAX_DESIGN_NAME_LENGTH))}
-                              onBlur={() => saveDesignNameEdit(design, index)}
-                              onClick={(event) => event.stopPropagation()}
-                              onKeyDown={(event) => {
-                                if (event.key === 'Enter') {
-                                  event.preventDefault();
-                                  saveDesignNameEdit(design, index);
-                                } else if (event.key === 'Escape') {
-                                  event.preventDefault();
-                                  cancelDesignNameEdit();
-                                }
-                              }}
-                              className="w-full bg-transparent text-[#191919] outline-none"
-                              aria-label="Byt namn på flik"
-                            />
+                            <>
+                              <input
+                                autoFocus
+                                value={editingDesignName}
+                                maxLength={MAX_DESIGN_NAME_LENGTH}
+                                onFocus={(event) => event.currentTarget.select()}
+                                onChange={(event) => setEditingDesignName(event.target.value.slice(0, MAX_DESIGN_NAME_LENGTH))}
+                                onBlur={() => saveDesignNameEdit(design, index)}
+                                onClick={(event) => event.stopPropagation()}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault();
+                                    saveDesignNameEdit(design, index);
+                                  } else if (event.key === 'Escape') {
+                                    event.preventDefault();
+                                    cancelDesignNameEdit();
+                                  }
+                                }}
+                                className={`w-full bg-transparent outline-none ${tabNameError ? 'text-[#C41230]' : 'text-[#191919]'}`}
+                                aria-label="Byt namn på flik"
+                              />
+                              {tabNameError && (
+                                <span className="absolute bottom-full left-0 mb-1 whitespace-nowrap rounded bg-[#C41230] px-2 py-0.5 text-[9px] font-semibold text-white">
+                                  Namnet används redan
+                                </span>
+                              )}
+                            </>
                           ) : (
                             <span
                               className="truncate"
@@ -1536,6 +1928,35 @@ const App: React.FC = () => {
                   >
                     +
                   </button>
+
+                  {/* Sparade golv tab */}
+                  <div className="h-[22px] self-end w-px bg-[#d9d9d9]"></div>
+                  <button
+                    type="button"
+                    disabled={!user}
+                    onClick={() => {
+                      if (!user) return;
+                      setShowSavedFloors((prev) => {
+                        if (!prev) loadSavedFloors();
+                        return !prev;
+                      });
+                    }}
+                    title={!user ? 'Logga in för att se sparade golv' : 'Sparade golv'}
+                    aria-label="Sparade golv"
+                    className={`pf-action-heading relative flex self-end items-center gap-1.5 border-0 bg-transparent px-4 pb-2 pt-2 font-medium whitespace-nowrap transition-colors ${
+                      user
+                        ? showSavedFloors
+                          ? 'text-[#1a1a1a]'
+                          : 'text-[#767676] hover:text-[#4a4a4a] cursor-pointer'
+                        : 'text-[#c0c0c0] cursor-not-allowed opacity-50'
+                    }`}
+                  >
+                    <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
+                    Sparade golv
+                    {showSavedFloors && <span className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#1a1a1a]" />}
+                  </button>
                 </div>
               </div>
             </div>
@@ -1565,6 +1986,196 @@ const App: React.FC = () => {
           </div>
 
           <main className="relative col-[2] min-h-0 min-w-0 overflow-hidden bg-[#f5f5f5]">
+            {/* Sparade golv panel */}
+            {showSavedFloors && (
+              <div className="absolute inset-0 z-40 overflow-auto bg-white">
+                <div className="px-8 py-7">
+                  <div className="mb-6 flex items-center justify-between">
+                    <h2 className="text-[18px] font-semibold text-[#1a1a1a] tracking-[-0.01em]">Sparade golv</h2>
+                    <button
+                      type="button"
+                      onClick={() => setShowSavedFloors(false)}
+                      className="flex h-8 w-8 items-center justify-center rounded-full text-[#767676] hover:bg-[#f0f0f0] hover:text-[#1a1a1a] transition-colors"
+                      aria-label="Stäng"
+                    >
+                      <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  </div>
+
+                  {savedFloorsLoading ? (
+                    <p className="text-[13px] text-[#767676]">Laddar…</p>
+                  ) : savedFloorsList.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 text-center">
+                      <svg className="mb-4 h-10 w-10 text-[#d9d9d9]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                      </svg>
+                      <p className="text-[13px] font-medium text-[#767676]">Inga sparade golv än.</p>
+                      <p className="mt-1 text-[12px] text-[#aaaaaa]">Tryck på "Spara" för att spara ett golv.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-4">
+                      {savedFloorsList.map((floor) => {
+                        const date = new Date(floor.updated_at);
+                        const dateStr = date.toLocaleDateString('sv-SE', { day: 'numeric', month: 'short' });
+                        const timeStr = date.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Stockholm' });
+                        const alreadyOpen = designState.designs.some((d) => d.savedFloorId === floor.id);
+                        const s = floor.summary;
+                        const areaMm2 = typeof s?.areaMm2 === 'number' ? s.areaMm2 : null;
+                        const wasteGreen = typeof s?.wastePercent === 'number' && s.wastePercent <= 15;
+                        return (
+                          <div key={floor.id} className="group rounded-2xl border border-[#e8e8e8] bg-white p-4 flex flex-col gap-3 hover:border-[#c8c8c8] transition-colors">
+                            <div className="flex h-[100px] items-center justify-center rounded-xl bg-[#f5f5f5] overflow-hidden">
+                              {floor.thumbnail ? (
+                                <img
+                                  src={floor.thumbnail}
+                                  alt={`Förhandsgranskning av ${floor.name || 'golv'}`}
+                                  className="w-full h-full object-cover"
+                                />
+                              ) : (
+                                <svg className="h-8 w-8 text-[#d9d9d9]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                                </svg>
+                              )}
+                            </div>
+                            <div className="flex-1">
+                              {renamingFloorId === floor.id ? (
+                                <input
+                                  autoFocus
+                                  value={renamingFloorName}
+                                  maxLength={MAX_DESIGN_NAME_LENGTH}
+                                  onChange={(e) => setRenamingFloorName(e.target.value)}
+                                  onBlur={() => handleRenameFloor(floor.id, renamingFloorName)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') { e.preventDefault(); handleRenameFloor(floor.id, renamingFloorName); }
+                                    if (e.key === 'Escape') { e.preventDefault(); setRenamingFloorId(null); }
+                                  }}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-full rounded border border-[#c8c8c8] bg-white px-2 py-0.5 text-[13px] font-semibold text-[#1a1a1a] outline-none focus:border-[#1a1a1a]"
+                                  aria-label="Byt namn på sparat golv"
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  onDoubleClick={() => { setRenamingFloorId(floor.id); setRenamingFloorName(floor.name); }}
+                                  title="Dubbelklicka för att byta namn"
+                                  className="w-full text-left text-[13px] font-semibold text-[#1a1a1a] truncate cursor-default"
+                                >
+                                  {floor.name || 'Namnlöst golv'}
+                                </button>
+                              )}
+                              {s?.productName && (
+                                <p className="mt-0.5 text-[11px] text-[#4a4a4a] truncate">{s.productName}</p>
+                              )}
+                              <div className="mt-1.5 flex items-center gap-2.5 flex-wrap">
+                                {areaMm2 !== null && (
+                                  <span className="text-[11px] text-[#767676]">{areaMm2.toFixed(1)} m²</span>
+                                )}
+                                {typeof s?.wastePercent === 'number' && (
+                                  <span className={`text-[11px] font-medium ${wasteGreen ? 'text-[#3D8B37]' : 'text-[#767676]'}`}>
+                                    Spill {s.wastePercent}%
+                                  </span>
+                                )}
+                                {typeof s?.packageCount === 'number' && (
+                                  <span className="text-[11px] text-[#767676]">{s.packageCount} förp.</span>
+                                )}
+                              </div>
+                              {typeof s?.totalPrice === 'number' && s.totalPrice > 0 && (
+                                <p className="mt-1 text-[11px] font-semibold text-[#1a1a1a]">
+                                  {s.totalPrice.toLocaleString('sv-SE', { maximumFractionDigits: 0 })} {s.currency ?? 'kr'}
+                                </p>
+                              )}
+                              <p className="mt-1 text-[10px] text-[#aaaaaa]">Sparad {dateStr} kl. {timeStr}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => handleLoadSavedFloor(floor)}
+                                disabled={alreadyOpen}
+                                className="flex-1 rounded-full bg-[#1a1a1a] py-1.5 text-[11px] font-semibold text-white transition-colors hover:bg-[#333] disabled:opacity-40 disabled:cursor-not-allowed"
+                              >
+                                {alreadyOpen ? 'Öppen' : 'Öppna'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSavedFloor(floor.id)}
+                                className="flex h-7 w-7 items-center justify-center rounded-full text-[#aaaaaa] hover:bg-[#fff0f0] hover:text-[#C41230] transition-colors"
+                                aria-label="Ta bort"
+                              >
+                                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                </svg>
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Unsaved changes dialog */}
+            {pendingCloseDesignId && (() => {
+              const design = designState.designs.find((d) => d.id === pendingCloseDesignId);
+              const idx = designState.designs.findIndex((d) => d.id === pendingCloseDesignId);
+              const name = design ? getDesignName(design, idx) : 'Golvet';
+              return (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" role="dialog" aria-modal="true">
+                  <div className="rounded-2xl border border-[#aaaaaa] bg-white p-6 max-w-[320px] w-full mx-4 shadow-lg">
+                    <h3 className="text-[14px] font-semibold text-[#1a1a1a] mb-1">Osparade ändringar</h3>
+                    <p className="text-[12px] text-[#767676] mb-5">
+                      <span className="font-medium text-[#1a1a1a]">"{name}"</span> har ändringar som inte är sparade. Vill du spara innan du stänger?
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {design && !design.savedFloorId ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            // Switch to that design, save it, then close
+                            setDesignState((prev) => ({ ...prev, activeDesignId: pendingCloseDesignId }));
+                            await handleSave();
+                            closeDesign(pendingCloseDesignId);
+                          }}
+                          className="rounded-full bg-[#1a1a1a] py-2 text-[12px] font-semibold text-white hover:bg-[#333] transition-colors"
+                        >
+                          Spara och stäng
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            setDesignState((prev) => ({ ...prev, activeDesignId: pendingCloseDesignId }));
+                            await handleSave();
+                            closeDesign(pendingCloseDesignId);
+                          }}
+                          className="rounded-full bg-[#1a1a1a] py-2 text-[12px] font-semibold text-white hover:bg-[#333] transition-colors"
+                        >
+                          Spara och stäng
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => closeDesign(pendingCloseDesignId)}
+                        className="rounded-full border border-[#d9d9d9] py-2 text-[12px] font-medium text-[#4a4a4a] hover:bg-[#f0f0f0] transition-colors"
+                      >
+                        Stäng utan att spara
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setPendingCloseDesignId(null)}
+                        className="text-[11px] text-[#767676] hover:text-[#1a1a1a] transition-colors py-1"
+                      >
+                        Avbryt
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             <div className="relative h-full min-h-0 min-w-0">
               {/* Left: zoom controls */}
               <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
@@ -1673,16 +2284,32 @@ const App: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  title="Spara (ej implementerat)"
+                  onClick={handleSave}
+                  disabled={!user || isSaving}
+                  title={user ? 'Spara golvdesign' : 'Logga in för att spara'}
                   aria-label="Spara"
-                  className="pf-action-heading flex h-8 items-center justify-center gap-1.5 rounded-full border border-[#d9d9d9] bg-white px-3 font-medium text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
+                  className={`pf-action-heading flex h-8 items-center justify-center gap-1.5 rounded-full border px-3 font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] ${
+                    user && !isSaving
+                      ? saveDone
+                        ? 'border-[#b8ddb5] bg-[#f0fbef] text-[#3D8B37]'
+                        : 'border-[#d9d9d9] bg-white text-[#4a4a4a] hover:text-[#1a1a1a]'
+                      : 'border-[#e8e8e8] bg-white text-[#c0c0c0] cursor-not-allowed opacity-50'
+                  }`}
                 >
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
-                    <polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="17 21 17 13 7 13 7 21" />
-                    <polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="7 3 7 8 15 8" />
-                  </svg>
-                  <span className="whitespace-nowrap">Spara</span>
+                  {saveDone ? (
+                    <svg className="h-3.5 w-3.5 text-[#3D8B37]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
+                      <polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="17 21 17 13 7 13 7 21" />
+                      <polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="7 3 7 8 15 8" />
+                    </svg>
+                  )}
+                  <span className="whitespace-nowrap" style={{ color: saveDone ? '#3D8B37' : undefined }}>
+                    {isSaving ? 'Sparar…' : saveDone ? 'Sparat!' : 'Spara'}
+                  </span>
                 </button>
                 <button
                   type="button"

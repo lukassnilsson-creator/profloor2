@@ -486,13 +486,6 @@ const Sidebar: React.FC<SidebarProps> = ({
         const maxMinPiece = Math.max(0, settings.length / 2);
         return (
           <div className="absolute left-5 bottom-[57px] w-[200px] bg-white rounded-2xl px-4 py-4 border border-[#aaaaaa] space-y-3">
-            <button
-              type="button"
-              onClick={onOptimize}
-              className="pf-action-heading w-full py-2.5 rounded-full bg-white text-[10px] font-semibold text-[#333333] transition-colors hover:bg-[#f0f0f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
-            >
-              Optimera spill
-            </button>
             <div className="space-y-2.5">
               <div>
                 <div className="mb-0.5 flex items-center justify-between">
@@ -571,15 +564,26 @@ const Sidebar: React.FC<SidebarProps> = ({
         );
       })()}
       {/* Sticky bottom bar */}
-      <div className="border-t border-[#d9d9d9] px-5 py-4 flex items-center gap-3 bg-white">
+      <div className="border-t border-[#d9d9d9] px-5 py-4 flex items-center gap-2 bg-white">
         <button
           type="button"
           onClick={() => setIsJusteraOpen((v) => !v)}
-          className="pf-action-heading h-8 w-[200px] px-3 rounded-full bg-white text-[10px] font-semibold text-[#333333] transition-colors hover:bg-[#f0f0f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] flex items-center gap-1.5"
+          className="pf-action-heading h-8 w-[149px] px-3 rounded-full bg-white text-[10px] font-semibold text-[#333333] transition-colors hover:bg-[#f0f0f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] flex items-center gap-1.5"
           aria-expanded={isJusteraOpen}
         >
           <img src="/icons/kugghjul-v01.svg" width="19" height="19" alt="" aria-hidden="true" style={{display:'block',flexShrink:0}} />
           <span className="leading-none">Justera läggning</span>
+        </button>
+        <button
+          type="button"
+          onClick={onOptimize}
+          className="pf-action-heading h-8 w-[149px] px-3 rounded-full bg-white text-[10px] font-semibold text-[#333333] transition-colors hover:bg-[#f0f0f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] flex items-center gap-1.5"
+        >
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{display:'block',flexShrink:0}} aria-hidden="true">
+            <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+            <path d="M18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+          </svg>
+          <span className="leading-none">Optimera läggning</span>
         </button>
         <button
           type="button"
