@@ -563,12 +563,16 @@ const App: React.FC = () => {
       .then(({ data, error }) => {
         if (error || !data?.floor_data) return;
         const payload = data.floor_data as {
+          name?: string;
           points?: Point[];
           settings?: PlankSettings;
           products?: SavedProduct[];
           savedProducts?: SavedProduct[]; // legacy
           activeProductId?: string | null;
           productSettingsById?: Record<string, ProductDesignSettings>;
+          backgroundDrawing?: ImportedDrawingBackground | null;
+          showBackgroundDrawing?: boolean;
+          backgroundOpacity?: number;
         };
         const restoredProducts = (payload.products ?? payload.savedProducts ?? [])
           .map(parseSavedProduct).filter((p): p is SavedProduct => p !== null).slice(0, 5);
@@ -578,10 +582,14 @@ const App: React.FC = () => {
             d.id === prev.activeDesignId
               ? {
                   ...d,
+                  ...(payload.name ? { name: payload.name } : {}),
                   ...(payload.points ? { points: payload.points } : {}),
                   ...(payload.settings ? { settings: payload.settings } : {}),
                   ...(payload.activeProductId !== undefined ? { activeProductId: payload.activeProductId } : {}),
                   ...(payload.productSettingsById ? { productSettingsById: payload.productSettingsById } : {}),
+                  ...(payload.backgroundDrawing !== undefined ? { backgroundDrawing: payload.backgroundDrawing } : {}),
+                  ...(payload.showBackgroundDrawing !== undefined ? { showBackgroundDrawing: payload.showBackgroundDrawing } : {}),
+                  ...(payload.backgroundOpacity !== undefined ? { backgroundOpacity: payload.backgroundOpacity } : {}),
                   products: restoredProducts,
                 }
               : d
@@ -599,13 +607,15 @@ const App: React.FC = () => {
     const encoded = hash.slice(2);
     try {
       const payload = decodeSharePayload(encoded) as {
+        name?: string;
         points?: Point[];
         settings?: PlankSettings;
+        products?: SavedProduct[];
         savedProducts?: SavedProduct[]; // legacy
         activeProductId?: string | null;
         productSettingsById?: Record<string, ProductDesignSettings>;
       };
-      const restoredProducts = (payload.savedProducts ?? [])
+      const restoredProducts = (payload.products ?? payload.savedProducts ?? [])
         .map(parseSavedProduct).filter((p): p is SavedProduct => p !== null).slice(0, 5);
       setDesignState((prev) => ({
         ...prev,
@@ -613,6 +623,7 @@ const App: React.FC = () => {
           d.id === prev.activeDesignId
             ? {
                 ...d,
+                ...(payload.name ? { name: payload.name } : {}),
                 ...(payload.points ? { points: payload.points } : {}),
                 ...(payload.settings ? { settings: payload.settings } : {}),
                 ...(payload.activeProductId !== undefined ? { activeProductId: payload.activeProductId } : {}),
@@ -763,12 +774,21 @@ const App: React.FC = () => {
   };
 
   const handleShare = async () => {
+    let compressedBackground: ImportedDrawingBackground | null = null;
+    if (activeDesign.backgroundDrawing?.src) {
+      const compressedSrc = await compressBackgroundImage(activeDesign.backgroundDrawing.src);
+      compressedBackground = { ...activeDesign.backgroundDrawing, src: compressedSrc };
+    }
     const payload = {
+      name: activeDesign.name,
       points,
       settings,
       products: activeDesign.products,
       activeProductId,
       productSettingsById: activeDesign.productSettingsById,
+      backgroundDrawing: compressedBackground ?? activeDesign.backgroundDrawing,
+      showBackgroundDrawing: activeDesign.showBackgroundDrawing,
+      backgroundOpacity: activeDesign.backgroundOpacity,
     };
     let url: string;
     try {
@@ -780,8 +800,8 @@ const App: React.FC = () => {
       if (error || !data) throw error;
       url = `${window.location.origin}${window.location.pathname}?shared=${data.id}`;
     } catch {
-      // Fallback: use URL hash with minimal payload
-      const minimalPayload = { points, settings, products: activeDesign.products, activeProductId, productSettingsById: activeDesign.productSettingsById };
+      // Fallback: use URL hash with minimal payload (no background — too large for URL)
+      const minimalPayload = { name: activeDesign.name, points, settings, products: activeDesign.products, activeProductId, productSettingsById: activeDesign.productSettingsById };
       const encoded = encodeSharePayload(minimalPayload);
       url = `${window.location.origin}${window.location.pathname}#s=${encoded}`;
       window.location.hash = `s=${encoded}`;
