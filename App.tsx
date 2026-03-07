@@ -39,7 +39,7 @@ const MAX_ZOOM_PERCENT = 500;
 const MAX_DESIGNS = 3;
 const MAX_DESIGN_NAME_LENGTH = 25;
 const DESIGN_LIMIT_MESSAGE = 'max 3 golvdesigner samtidigt.';
-const DEFAULT_BACKGROUND_OPACITY = 0.2;
+const DEFAULT_BACKGROUND_OPACITY = 0.1;
 const UNDO_HISTORY_LIMIT = 20;
 
 const PRODUCT_STORAGE_KEY = 'profloor.saved-products';
@@ -520,10 +520,6 @@ const App: React.FC = () => {
   const backgroundDrawing = activeDesign.backgroundDrawing;
   const showBackgroundDrawing = activeDesign.showBackgroundDrawing;
   const backgroundOpacity = activeDesign.backgroundOpacity;
-  const maxOffset = Math.max(0, settings.length - settings.minEndPiece);
-  const maxVerticalOffset = Math.max(0, settings.width);
-  const maxMinPiece = Math.max(0, settings.length / 2);
-
   // Restore shared design from URL hash on mount
   useEffect(() => {
     const hash = window.location.hash.slice(1);
@@ -1128,7 +1124,7 @@ const App: React.FC = () => {
 
     const scaleW = availableW / (roomW || 1);
     const scaleH = availableH / (roomH || 1);
-    const extentsScale = Math.min(scaleW, scaleH, 0.4) * 0.75;
+    const extentsScale = Math.min(scaleW, scaleH, 0.4) * 0.75 * 0.85;
     const newScale = Math.max(MIN_SCALE, extentsScale);
     const leftShiftPx = isToolsPanelOpen ? canvas.clientWidth * 0.10 : 0;
 
@@ -1316,87 +1312,8 @@ const App: React.FC = () => {
   };
 
   const toolsPanelContent = (
-    <div className="space-y-2 rounded border border-[#d9d9d9] bg-white p-2.5 shadow-[0_8px_24px_rgba(0,0,0,0.09)]">
-      <div className="space-y-1.5">
-        <p className="text-[9px] font-medium text-[#767676]">Optimering</p>
-        <div>
-          <div className="mb-0.5 flex items-center justify-between">
-            <label className="text-[9px] font-medium text-[#767676]">Skarvförskjutning</label>
-            <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(settings.minStagger)} mm</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max={Math.max(0, settings.length)}
-            step="10"
-            value={settings.minStagger}
-            onChange={(event) => {
-              const next = Math.max(0, parseInt(event.target.value, 10) || 0);
-              setActiveSettings({ ...settings, minStagger: next });
-            }}
-            className="kahrs-slider"
-          />
-        </div>
-
-        <div>
-          <div className="mb-0.5 flex items-center justify-between">
-            <label className="text-[9px] font-medium text-[#767676]">Startförskjutning hor.</label>
-            <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(settings.startOffset)} mm</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max={Math.max(0, maxOffset)}
-            step="10"
-            value={settings.startOffset}
-            onChange={(event) => {
-              const next = Math.max(0, parseInt(event.target.value, 10) || 0);
-              setActiveSettings({ ...settings, startOffset: Math.min(next, maxOffset) });
-            }}
-            className="kahrs-slider"
-          />
-        </div>
-
-        <div>
-          <div className="mb-0.5 flex items-center justify-between">
-            <label className="text-[9px] font-medium text-[#767676]">Startförskjutning vert.</label>
-            <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(settings.startOffsetVertical)} mm</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max={Math.max(0, maxVerticalOffset)}
-            step="10"
-            value={settings.startOffsetVertical}
-            onChange={(event) => {
-              const next = Math.max(0, parseInt(event.target.value, 10) || 0);
-              setActiveSettings({ ...settings, startOffsetVertical: Math.min(next, maxVerticalOffset) });
-            }}
-            className="kahrs-slider"
-          />
-        </div>
-
-        <div>
-          <div className="mb-0.5 flex items-center justify-between">
-            <label className="text-[9px] font-medium text-[#767676]">Minsta ändbit</label>
-            <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(settings.minEndPiece)} mm</span>
-          </div>
-          <input
-            type="range"
-            min="0"
-            max={Math.max(0, maxMinPiece)}
-            step="10"
-            value={settings.minEndPiece}
-            onChange={(event) => {
-              const next = Math.max(0, parseInt(event.target.value, 10) || 0);
-              setActiveSettings({ ...settings, minEndPiece: Math.min(next, maxMinPiece) });
-            }}
-            className="kahrs-slider"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-1 border-t border-[#e8e8e8] pt-2">
+    <div className="space-y-2 rounded-2xl border border-[#aaaaaa] bg-white p-2.5">
+      <div className="space-y-1 border-[#e8e8e8]">
         <p className="text-[9px] font-medium text-[#767676]">Bedömning</p>
         <label className="block text-[9px] font-medium text-[#767676]">Mönsterkontrast</label>
         <input
@@ -1421,30 +1338,37 @@ const App: React.FC = () => {
       </div>
 
 
-      <label className="flex items-center gap-2 text-[10px] font-medium text-[#4a4a4a]">
-        <input
-          type="checkbox"
-          checked={showEdgeLengths}
-          onChange={() => setShowEdgeLengths((prev) => !prev)}
-          className="h-3.5 w-3.5 rounded border-[#d9d9d9] text-[#C41230] focus:ring-[#C41230]"
-        />
-        Golvmått
-      </label>
-
-      <label className={`flex items-center gap-2 text-[10px] font-medium ${backgroundDrawing ? 'text-[#4a4a4a]' : 'text-[#aaaaaa]'}`}>
-        <input
-          type="checkbox"
-          checked={showBackgroundDrawing}
+      <div className="grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => setShowEdgeLengths((prev) => !prev)}
+          className={`pf-action-heading rounded-full px-2 py-1.5 text-[10px] font-medium transition-colors ${
+            showEdgeLengths
+              ? 'border border-[#aaaaaa] bg-white text-[#333333]'
+              : 'bg-white text-[#666] hover:bg-[#f0f0f0]'
+          }`}
+        >
+          {showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
+        </button>
+        <button
+          type="button"
           disabled={!backgroundDrawing}
-          onChange={handleToggleBackgroundDrawing}
-          className="h-3.5 w-3.5 rounded border-[#d9d9d9] text-[#C41230] focus:ring-[#C41230]"
-        />
-        Bakgrundsritning
-      </label>
+          onClick={handleToggleBackgroundDrawing}
+          className={`pf-action-heading rounded-full px-2 py-1.5 text-[10px] font-medium transition-colors ${
+            backgroundDrawing && showBackgroundDrawing
+              ? 'border border-[#aaaaaa] bg-white text-[#333333]'
+              : backgroundDrawing
+                ? 'bg-white text-[#666] hover:bg-[#f0f0f0]'
+                : 'cursor-not-allowed bg-white text-[#B0B0B0]'
+          }`}
+        >
+          {backgroundDrawing && showBackgroundDrawing ? 'Dölj ritning' : 'Visa ritning'}
+        </button>
+      </div>
 
       <div className="space-y-1">
         <div className="flex items-center justify-between">
-          <label className="text-[9px] font-medium text-[#666]">Opacitet</label>
+          <label className="text-[9px] font-medium text-[#666]">Opacitet ritning</label>
           <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(backgroundOpacity * 100)}%</span>
         </div>
         <input
@@ -1462,12 +1386,12 @@ const App: React.FC = () => {
       <button
         type="button"
         onClick={handleReset}
-        className="flex h-8 w-full items-center justify-center gap-1.5 border border-[#fad0d5] bg-[#fff5f6] text-[9px] font-medium text-[#C41230] transition-colors hover:bg-[#ffe8eb] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
-        aria-label="Radera ritning"
-        title="Radera ritning"
+        className="pf-action-heading flex w-full items-center justify-center gap-1.5 rounded-full py-1.5 px-2 text-[10px] font-medium text-[#C41230] bg-[#fff5f6] transition-colors hover:bg-[#ffe8eb]"
+        aria-label="Återställ design"
+        title="Återställ design"
       >
         <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" /></svg>
-        <span>Radera ritning</span>
+        <span>Återställ design</span>
       </button>
 
       <div className="flex items-center gap-1 border-t border-[#e8e8e8] pt-2">
@@ -1475,7 +1399,7 @@ const App: React.FC = () => {
           type="button"
           onClick={handleUndo}
           disabled={!canUndo}
-          className="flex h-8 w-full items-center justify-center border border-[#d9d9d9] bg-white text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] disabled:cursor-not-allowed disabled:opacity-45"
+          className="flex h-8 w-full items-center justify-center rounded-full bg-white text-[#4a4a4a] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] disabled:cursor-not-allowed disabled:opacity-45"
           title="Undo (Cmd/Ctrl+Z)"
           aria-label="Undo"
         >
@@ -1485,7 +1409,7 @@ const App: React.FC = () => {
           type="button"
           onClick={handleRedo}
           disabled={!canRedo}
-          className="flex h-8 w-full items-center justify-center border border-[#d9d9d9] bg-white text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] disabled:cursor-not-allowed disabled:opacity-45"
+          className="flex h-8 w-full items-center justify-center rounded-full bg-white text-[#4a4a4a] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] disabled:cursor-not-allowed disabled:opacity-45"
           title="Redo (Cmd/Ctrl+Shift+Z / Ctrl+Y)"
           aria-label="Redo"
         >

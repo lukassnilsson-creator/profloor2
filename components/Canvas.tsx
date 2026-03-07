@@ -890,7 +890,7 @@ const Canvas: React.FC<CanvasProps> = ({
 
       {contextMenu && (
         <div
-          className="fixed z-50 min-w-[190px] border border-[#D9D4CF] bg-white py-1 shadow-2xl"
+          className="fixed z-50 min-w-[190px] rounded-2xl border border-[#aaaaaa] bg-white py-1"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(event) => event.stopPropagation()}
         >
@@ -940,10 +940,10 @@ const Canvas: React.FC<CanvasProps> = ({
                     onToggleEdgeLengths();
                     setContextMenu(null);
                   }}
-                  className={`pf-action-heading rounded border px-2 py-1.5 text-center font-medium transition-colors ${
+                  className={`pf-action-heading rounded-full px-2 py-1.5 text-center text-[10px] font-medium transition-colors ${
                     showEdgeLengths
-                      ? 'border-[#B69181] bg-[#F6F0EC] text-[#1A1A1A]'
-                      : 'border-[#D9D4CF] bg-white text-[#666]'
+                      ? 'border border-[#aaaaaa] bg-white text-[#333333]'
+                      : 'bg-white text-[#666]  hover:bg-[#f0f0f0]'
                   }`}
                 >
                   {showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
@@ -957,15 +957,15 @@ const Canvas: React.FC<CanvasProps> = ({
                     onToggleBackgroundDrawing();
                     setContextMenu(null);
                   }}
-                  className={`pf-action-heading rounded border px-2 py-1.5 text-center font-medium transition-colors ${
+                  className={`pf-action-heading rounded-full px-2 py-1.5 text-center text-[10px] font-medium transition-colors ${
                     backgroundDrawing && showBackgroundDrawing
-                      ? 'border-[#B69181] bg-[#F6F0EC] text-[#1A1A1A]'
+                      ? 'border border-[#aaaaaa] bg-white text-[#333333]'
                       : backgroundDrawing
-                        ? 'border-[#D9D4CF] bg-white text-[#666]'
-                        : 'cursor-not-allowed border-[#D9D4CF] bg-white text-[#B0B0B0]'
+                        ? 'bg-white text-[#666] hover:bg-[#f0f0f0]'
+                        : 'cursor-not-allowed bg-white text-[#B0B0B0]'
                   }`}
                 >
-                  {backgroundDrawing && showBackgroundDrawing ? 'Dölj bakgrund' : 'Visa bakgrund'}
+                  {backgroundDrawing && showBackgroundDrawing ? 'Dölj ritning' : 'Visa ritning'}
                 </button>
               </div>
 
@@ -973,7 +973,7 @@ const Canvas: React.FC<CanvasProps> = ({
                 {/* Admin: grid opacity slider removed from UI — use setGridOpacity(0–1) to restore */}
                 <div>
                   <div className="mb-0.5 flex items-center justify-between">
-                    <label className="text-[9px] font-medium text-[#686868]">Opacitet</label>
+                    <label className="text-[9px] font-medium text-[#686868]">Opacitet ritning</label>
                     <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(backgroundOpacity * 100)}%</span>
                   </div>
                   <input
@@ -1005,21 +1005,23 @@ const Canvas: React.FC<CanvasProps> = ({
                 </div>
               </div>
 
-              <div className="my-1 border-t border-[#ECE7E3]" />
+              <div className="mt-[7px] mb-[7px] border-t border-[#ECE7E3]" />
 
-              <button
-                type="button"
-                onClick={() => {
-                  onZoomExtents();
-                  setContextMenu(null);
-                }}
-                className="pf-action-heading w-full px-4 py-2 text-left font-medium text-[#1A1A1A] hover:bg-[#F6F2EF] flex items-center gap-2"
-              >
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-3.5 h-3.5 flex-shrink-0">
-                  <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
-                </svg>
-                Visa hela
-              </button>
+              <div className="px-3 pb-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onZoomExtents();
+                    setContextMenu(null);
+                  }}
+                  className="pf-action-heading w-full rounded-full py-1.5 px-3 text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors flex items-center justify-center gap-1.5"
+                >
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M4 10.5l8-6 8 6M6.5 9.75V19.5a1 1 0 001 1h9a1 1 0 001-1V9.75M10 20v-5a1 1 0 011-1h2a1 1 0 011 1v5" />
+                  </svg>
+                  Visa hela
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -1031,7 +1033,7 @@ const Canvas: React.FC<CanvasProps> = ({
           className="pointer-events-auto absolute bottom-6 right-6 z-30 w-64"
           style={{ transform: `translate(${toolPanelOffset.x}px, ${toolPanelOffset.y}px)` }}
         >
-          <div className="space-y-3 border border-[#D9D4CF] bg-white/96 p-3 shadow-[0_8px_24px_rgba(0,0,0,0.1)] backdrop-blur-sm">
+          <div className="space-y-3 rounded-2xl border border-[#aaaaaa] bg-white p-3">
             <div
               className="flex cursor-grab items-center justify-between rounded bg-[#F3F0ED] px-2 py-1 text-[10px] font-medium text-[#595959] active:cursor-grabbing"
               onMouseDown={(event) => {
@@ -1067,37 +1069,37 @@ const Canvas: React.FC<CanvasProps> = ({
                 <button
                   type="button"
                   onClick={onToggleEdgeLengths}
-                  className={`pf-action-heading rounded border px-2 py-1.5 font-medium transition-colors ${
+                  className={`pf-action-heading rounded-full px-2 py-1.5 text-[10px] font-medium transition-colors ${
                     showEdgeLengths
-                      ? 'border-[#B69181] bg-[#F6F0EC] text-[#1A1A1A]'
-                      : 'border-[#D9D4CF] bg-white text-[#666]'
+                      ? 'border border-[#aaaaaa] bg-white text-[#333333]'
+                      : 'bg-white text-[#666] hover:bg-[#f0f0f0]'
                   }`}
                 >
                   {showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
+                </button>
+                <button
+                  type="button"
+                  disabled={!backgroundDrawing}
+                  onClick={onToggleBackgroundDrawing}
+                  className={`pf-action-heading rounded-full px-2 py-1.5 text-[10px] font-medium transition-colors ${
+                    backgroundDrawing && showBackgroundDrawing
+                      ? 'border border-[#aaaaaa] bg-white text-[#333333]'
+                      : backgroundDrawing
+                        ? 'bg-white text-[#666] hover:bg-[#f0f0f0]'
+                        : 'cursor-not-allowed bg-white text-[#B0B0B0]'
+                  }`}
+                >
+                  {backgroundDrawing && showBackgroundDrawing ? 'Dölj ritning' : 'Visa ritning'}
                 </button>
               </div>
             </div>
 
             <div className="space-y-2 border-t border-[#ECE7E3] pt-2">
-              <div className="flex items-center justify-between">
-                <label className="pf-label text-[#666]">Bakgrundsritning</label>
-                <button
-                  type="button"
-                  disabled={!backgroundDrawing}
-                  onClick={onToggleBackgroundDrawing}
-                  className={`pf-action-heading font-medium ${
-                    backgroundDrawing ? 'text-[#1A1A1A] hover:text-[#8F6655]' : 'text-[#9A9A9A]'
-                  }`}
-                >
-                  {showBackgroundDrawing ? 'Dölj' : 'Visa'}
-                </button>
-              </div>
-
               {backgroundDrawing ? (
                 <>
                   <div>
                     <div className="mb-1 flex items-center justify-between">
-                      <label className="pf-label text-[#666]">Opacitet</label>
+                      <label className="pf-label text-[#666]">Opacitet ritning</label>
                       <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(backgroundOpacity * 100)}%</span>
                     </div>
                     <input
@@ -1114,9 +1116,9 @@ const Canvas: React.FC<CanvasProps> = ({
                   <button
                     type="button"
                     onClick={onRemoveBackgroundDrawing}
-                    className="pf-action-heading w-full rounded border border-[#E0C6BC] bg-[#FFF8F6] px-2 py-1.5 font-medium text-[#8D4F3A] transition-colors hover:bg-[#FFF1ED]"
+                    className="pf-action-heading w-full rounded-full py-1.5 px-2 text-[10px] font-medium text-[#333333] transition-colors hover:bg-[#f0f0f0]"
                   >
-                    Ta bort bakgrund
+                    Radera ritning
                   </button>
                 </>
               ) : (
