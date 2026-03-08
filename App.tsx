@@ -1512,35 +1512,67 @@ const App: React.FC = () => {
   };
 
   const addProduct = (product: SavedProduct, targetDesignId: string) => {
-    // Stamp lastRefreshedAt so background refresh doesn't re-fetch immediately
     const stamped: SavedProduct = { ...product, lastRefreshedAt: new Date().toISOString() };
 
-    if (targetDesignId === activeDesign.id) {
-      // Happy path: user is still on the same tab — add + activate as before
-      const normalizedIncomingUrl = stamped.url.trim();
-      const duplicate = activeDesign.products.find((existing) => existing.url.trim() === normalizedIncomingUrl);
-      if (duplicate) {
-        activateProduct(duplicate);
-        return;
+    // Always use setDesignState with the captured targetDesignId so we never rely on
+    // the closure's activeDesign — which may be stale if the user switched tabs.
+    setDesignState((prev) => {
+      const target = prev.designs.find((d) => d.id === targetDesignId);
+      if (!target) return prev;
+
+      const normalizedUrl = stamped.url.trim();
+      if (target.products.some((p) => p.url.trim() === normalizedUrl) || target.products.length >= 5) return prev;
+
+      const isNewProduct = !target.productSettingsById[stamped.id];
+      const existingSettings = target.productSettingsById[stamped.id] ?? getProductDefaults(stamped);
+      const productSettingsById = isNewProduct
+        ? { ...target.productSettingsById, [stamped.id]: existingSettings }
+        : target.productSettingsById;
+
+      const baseSettings: PlankSettings = {
+        ...target.settings,
+        length: stamped.lengthMm,
+        width: stamped.widthMm,
+        planksPerPackage: stamped.planksPerPackage,
+        minStagger: existingSettings.minStagger,
+        startOffset: existingSettings.startOffset,
+        startOffsetVertical: existingSettings.startOffsetVertical,
+        minEndPiece: existingSettings.minEndPiece,
+        layoutRotated: existingSettings.layoutRotated,
+      };
+
+      // Auto-optimize waste for new products that have a drawn room shape
+      let finalSettings = baseSettings;
+      if (isNewProduct && target.points.length >= 3) {
+        const minStaggerMin = baseSettings.length < 1000
+          ? Math.ceil(baseSettings.length * 0.25 / 10) * 10
+          : 250;
+        const optimized = findOptimizedLayout(target.points, baseSettings, { ...DEFAULT_OPTIMIZATION_CONSTRAINTS, minStaggerMin });
+        finalSettings = { ...baseSettings, ...optimized };
       }
-      if (activeDesign.products.length >= 5) return;
-      updateActiveDesign((design) => ({ ...design, products: [stamped, ...design.products] }));
-      activateProduct(stamped);
-    } else {
-      // User switched tabs during the fetch — add the product silently to the original tab
-      setDesignState((prev) => {
-        const target = prev.designs.find((d) => d.id === targetDesignId);
-        if (!target) return prev;
-        if (target.products.length >= 5) return prev;
-        if (target.products.some((p) => p.url.trim() === stamped.url.trim())) return prev;
-        return {
-          ...prev,
-          designs: prev.designs.map((d) =>
-            d.id === targetDesignId ? { ...d, products: [stamped, ...d.products] } : d
-          ),
-        };
-      });
-    }
+
+      const updatedDesign: FloorDesign = {
+        ...target,
+        products: [stamped, ...target.products],
+        activeProductId: stamped.id,
+        productInfo: {
+          name: stamped.name,
+          pricePerPackage: stamped.pricePerPackage,
+          currency: stamped.currency,
+          url: stamped.url,
+          stockStatus: stamped.stockStatus,
+          deliveryEstimate: stamped.deliveryEstimate,
+          isCampaignPrice: stamped.isCampaignPrice,
+          imageUrl: stamped.imageUrl,
+        },
+        productSettingsById,
+        settings: finalSettings,
+      };
+
+      return { ...prev, designs: prev.designs.map((d) => (d.id === targetDesignId ? updatedDesign : d)) };
+    });
+
+    setIsManualActive(false);
   };
 
   const removeProduct = (productId: string) => {

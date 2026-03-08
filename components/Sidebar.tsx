@@ -47,6 +47,14 @@ const Sidebar: React.FC<SidebarProps> = ({
   const scrollRevealTimeoutRef = useRef<number | null>(null);
   const [isSidebarScrolling, setIsSidebarScrolling] = useState(false);
   const [isJusteraOpen, setIsJusteraOpen] = useState(false);
+  const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(new Set());
+  const toggleProductExpanded = (id: string) => {
+    setExpandedProductIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
   const justeraRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -138,6 +146,7 @@ const Sidebar: React.FC<SidebarProps> = ({
         imageUrl: typeof data.imageUrl === 'string' && data.imageUrl.trim() ? data.imageUrl : undefined,
         lengthMm: data.lengthMm,
         widthMm: data.widthMm,
+        thicknessMm: typeof data.thicknessMm === 'number' && data.thicknessMm > 0 ? data.thicknessMm : undefined,
         planksPerPackage: data.planksPerPackage,
         minStagger: settings.minStagger,
         startOffset: settings.startOffset,
@@ -339,6 +348,50 @@ const Sidebar: React.FC<SidebarProps> = ({
                         <div className="text-[8px] text-[#767676]">Leverans: {deliveryEstimate}</div>
                       </div>
                     </div>
+
+                    {/* Produktspecifikationer — dragspelsmeny */}
+                    {(() => {
+                      const isExpanded = expandedProductIds.has(product.id);
+                      const packageAreaM2 = (product.lengthMm * product.widthMm * product.planksPerPackage) / 1_000_000;
+                      const packageAreaFormatted = Number.isFinite(packageAreaM2) && packageAreaM2 > 0
+                        ? packageAreaM2.toFixed(2)
+                        : null;
+                      return (
+                        <>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); toggleProductExpanded(product.id); }}
+                            className="w-full flex items-center justify-between px-4 py-1.5 text-[8px] text-[#767676] hover:text-[#1a1a1a] hover:bg-[#f5f5f5] transition-colors border-t border-[#EAE6E3]"
+                            aria-expanded={isExpanded}
+                          >
+                            <span className="font-medium">Produktspecifikationer</span>
+                            <svg
+                              width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"
+                              style={{ transform: isExpanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}
+                              aria-hidden="true"
+                            >
+                              <polyline points="2,3.5 5,6.5 8,3.5" />
+                            </svg>
+                          </button>
+                          {isExpanded && (
+                            <div className="px-4 py-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-[#EAE6E3] bg-[#fafafa]">
+                              {[
+                                { label: 'Längd', value: `${product.lengthMm} mm` },
+                                { label: 'Bredd', value: `${product.widthMm} mm` },
+                                ...(product.thicknessMm ? [{ label: 'Tjocklek', value: `${product.thicknessMm} mm` }] : []),
+                                { label: 'St/förp.', value: `${product.planksPerPackage} st` },
+                                ...(packageAreaFormatted ? [{ label: 'm²/förp.', value: `${packageAreaFormatted} m²` }] : []),
+                              ].map(({ label, value }) => (
+                                <div key={label} className="flex justify-between items-baseline">
+                                  <span className="text-[8px] text-[#9A9A9A] font-medium">{label}</span>
+                                  <span className="text-[8px] font-semibold text-[#1a1a1a]">{value}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
 
                     {/* Kundfavorit banner */}
                     {product.isCampaignPrice && (

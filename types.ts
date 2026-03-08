@@ -27,6 +27,7 @@ export interface SavedProduct {
   imageUrl?: string;
   lengthMm: number;
   widthMm: number;
+  thicknessMm?: number;
   planksPerPackage: number;
   minStagger: number;
   startOffset: number;

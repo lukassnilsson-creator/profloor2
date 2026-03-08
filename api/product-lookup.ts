@@ -177,7 +177,7 @@ const extractDimensionsWithGemini = async (
 
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
-    contents: `Extract flooring product specifications from the following product page text. Return JSON only.\n\nFields to extract:\n- lengthMm: plank length in millimeters (number)\n- widthMm: plank width in millimeters (number)\n- planksPerPackage: number of planks per package (number)\n- deliveryEstimate: estimated delivery time as a short string (e.g. "2-5 vardagar")\n- isCampaignPrice: true if the price is a campaign/discount price${extraFields}\n\nIf a value cannot be found, omit that field.\n\nProduct page text:\n${productText}`,
+    contents: `Extract flooring product specifications from the following product page text. Return JSON only.\n\nFields to extract:\n- lengthMm: plank length in millimeters (number)\n- widthMm: plank width in millimeters (number)\n- thicknessMm: plank thickness in millimeters (number)\n- planksPerPackage: number of planks per package (number)\n- deliveryEstimate: estimated delivery time as a short string (e.g. "2-5 vardagar")\n- isCampaignPrice: true if the price is a campaign/discount price${extraFields}\n\nIf a value cannot be found, omit that field.\n\nProduct page text:\n${productText}`,
     config: {
       responseMimeType: 'application/json',
       responseSchema: {
@@ -185,6 +185,7 @@ const extractDimensionsWithGemini = async (
         properties: {
           lengthMm: { type: Type.NUMBER },
           widthMm: { type: Type.NUMBER },
+          thicknessMm: { type: Type.NUMBER },
           planksPerPackage: { type: Type.NUMBER },
           deliveryEstimate: { type: Type.STRING },
           isCampaignPrice: { type: Type.BOOLEAN },
@@ -302,6 +303,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           productName: nameFromLd ?? dimensions.productName,
           lengthMm: dimensions.lengthMm,
           widthMm: dimensions.widthMm,
+          thicknessMm: typeof dimensions.thicknessMm === 'number' && dimensions.thicknessMm > 0 ? dimensions.thicknessMm : undefined,
           planksPerPackage: dimensions.planksPerPackage,
           pricePerPackage: priceFromLd ?? dimensions.pricePerPackage,
           currency: currencyFromLd ?? dimensions.currency ?? 'SEK',
