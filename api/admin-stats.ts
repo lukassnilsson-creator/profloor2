@@ -58,7 +58,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     // ── Fetch all data in parallel ────────────────────────────────────────────
     const [authUsersResult, savedFloorsResult, sharedFloorsResult] = await Promise.all([
       supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }),
-      supabaseAdmin.from('saved_floors').select('id, user_id, created_at, floor_data'),
+      supabaseAdmin.from('saved_floors').select('id, user_id, created_at, data'),
       supabaseAdmin.from('shared_floors').select('id, created_by, created_at'),
     ]);
 
@@ -90,7 +90,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     let floorsWithArea = 0;
 
     for (const floor of savedFloors) {
-      const data = isRecord(floor.floor_data) ? floor.floor_data : null;
+      const data = isRecord(floor.data) ? floor.data : null;
       if (!data) continue;
 
       // Product URL counts
