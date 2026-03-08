@@ -288,7 +288,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     if (html) {
       const jsonLd = extractJsonLd(html);
-      const imageUrl = extractOgImage(html, productUrl);
+      const ogImage = extractOgImage(html, productUrl);
+      // Fall back to JSON-LD image field if og:image/twitter:image not found
+      const jsonLdImage = jsonLd?.image
+        ? (Array.isArray(jsonLd.image) ? jsonLd.image[0] : jsonLd.image)
+        : null;
+      const imageUrl = ogImage ?? (typeof jsonLdImage === 'string' && jsonLdImage ? jsonLdImage : null);
       const productText = extractRelevantText(html);
 
       const offer = jsonLd?.offers
