@@ -28,6 +28,7 @@ interface CanvasProps {
   onBackgroundOpacityChange: (opacity: number) => void;
   onRemoveBackgroundDrawing: () => void;
   onZoomExtents: () => void;
+  onResetDesign?: () => void;
   showFloatingToolPanel?: boolean;
   stats: Stats;
   productInfo: ProductInfo | null;
@@ -115,6 +116,7 @@ const Canvas: React.FC<CanvasProps> = ({
   onBackgroundOpacityChange,
   onRemoveBackgroundDrawing,
   onZoomExtents,
+  onResetDesign,
   showFloatingToolPanel = true,
   stats,
   productInfo
@@ -137,6 +139,7 @@ const Canvas: React.FC<CanvasProps> = ({
   const [gridOpacity, setGridOpacity] = useState(0.4); // Admin: expose setGridOpacity via admin panel to let users adjust
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [toolPanelOffset, setToolPanelOffset] = useState(loadToolPanelOffset);
+  const [showGrid, setShowGrid] = useState(true);
 
   // Kährs palette
   const factoryColor = { r: 210, g: 183, b: 172 };
@@ -401,7 +404,7 @@ const Canvas: React.FC<CanvasProps> = ({
     ctx.strokeStyle = `rgba(232, 227, 222, ${gridOpacity})`;
     ctx.lineWidth = 1;
     const visualGridSize = gridSize * scale;
-    if (visualGridSize > 5) {
+    if (showGrid && visualGridSize > 5) {
       ctx.beginPath();
       for (let x = centerX % visualGridSize; x < canvas.width; x += visualGridSize) {
         ctx.moveTo(x, 0);
@@ -521,6 +524,7 @@ const Canvas: React.FC<CanvasProps> = ({
     scale,
     settings,
     showBackgroundDrawing,
+    showGrid,
     wastePieces
   ]);
 
@@ -890,7 +894,7 @@ const Canvas: React.FC<CanvasProps> = ({
 
       {contextMenu && (
         <div
-          className="fixed z-50 min-w-[190px] rounded-2xl border border-[#aaaaaa] bg-white py-1"
+          className="fixed z-50 w-[150px] rounded-2xl border border-[#aaaaaa] bg-white py-1.5"
           style={{ left: contextMenu.x, top: contextMenu.y }}
           onClick={(event) => event.stopPropagation()}
         >
@@ -933,93 +937,61 @@ const Canvas: React.FC<CanvasProps> = ({
             </>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-2 px-3 py-2">
+              <div className="px-1.5 py-0.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    onToggleEdgeLengths();
-                    setContextMenu(null);
-                  }}
-                  className={`pf-action-heading rounded-full px-2 py-1.5 text-center text-[10px] font-medium transition-colors ${
-                    showEdgeLengths
-                      ? 'border border-[#aaaaaa] bg-white text-[#333333]'
-                      : 'bg-white text-[#666]  hover:bg-[#f0f0f0]'
-                  }`}
+                  onClick={() => { onToggleEdgeLengths(); setContextMenu(null); }}
+                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
                 >
                   {showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
                 </button>
+              </div>
 
+              <div className="px-1.5 py-0.5">
                 <button
                   type="button"
-                  disabled={!backgroundDrawing}
-                  onClick={() => {
-                    if (!backgroundDrawing) return;
-                    onToggleBackgroundDrawing();
-                    setContextMenu(null);
-                  }}
-                  className={`pf-action-heading rounded-full px-2 py-1.5 text-center text-[10px] font-medium transition-colors ${
-                    backgroundDrawing && showBackgroundDrawing
-                      ? 'border border-[#aaaaaa] bg-white text-[#333333]'
-                      : backgroundDrawing
-                        ? 'bg-white text-[#666] hover:bg-[#f0f0f0]'
-                        : 'cursor-not-allowed bg-white text-[#B0B0B0]'
-                  }`}
+                  onClick={() => { setSettings({ ...settings, visualContrast: settings.visualContrast > 0 ? 0 : 0.3 }); setContextMenu(null); }}
+                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
                 >
-                  {backgroundDrawing && showBackgroundDrawing ? 'Dölj ritning' : 'Visa ritning'}
+                  {settings.visualContrast > 0 ? 'Dölj läggningskontrast' : 'Visa läggningskontrast'}
                 </button>
               </div>
 
-              <div className="space-y-2 px-4 pb-2 pt-1">
-                {/* Admin: grid opacity slider removed from UI — use setGridOpacity(0–1) to restore */}
-                <div>
-                  <div className="mb-0.5 flex items-center justify-between">
-                    <label className="text-[9px] font-medium text-[#686868]">Opacitet ritning</label>
-                    <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(backgroundOpacity * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    step="1"
-                    value={Math.round(backgroundOpacity * 100)}
-                    disabled={!backgroundDrawing}
-                    onChange={(event) => onBackgroundOpacityChange((parseInt(event.target.value, 10) || 0) / 100)}
-                    className="kahrs-slider disabled:opacity-40"
-                  />
-                </div>
-
-                <div>
-                  <div className="mb-0.5 flex items-center justify-between">
-                    <label className="text-[9px] font-medium text-[#686868]">Mönsterkontrast</label>
-                    <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(settings.visualContrast * 100)}%</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.1"
-                    value={settings.visualContrast}
-                    onChange={(event) => setSettings({ ...settings, visualContrast: parseFloat(event.target.value) })}
-                    className="kahrs-slider"
-                  />
-                </div>
-              </div>
-
-              <div className="mt-[7px] mb-[7px] border-t border-[#ECE7E3]" />
-
-              <div className="px-3 pb-2">
+              <div className="px-1.5 py-0.5">
                 <button
                   type="button"
-                  onClick={() => {
-                    onZoomExtents();
-                    setContextMenu(null);
-                  }}
-                  className="pf-action-heading w-full rounded-full py-1.5 px-3 text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors flex items-center justify-center gap-1.5"
+                  disabled={!backgroundDrawing}
+                  onClick={() => { if (!backgroundDrawing) return; onBackgroundOpacityChange(backgroundOpacity > 0 ? 0 : 0.15); setContextMenu(null); }}
+                  className={`pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium transition-colors ${
+                    !backgroundDrawing ? 'cursor-not-allowed text-[#B0B0B0]' : 'text-[#333333] hover:bg-[#f0f0f0]'
+                  }`}
                 >
-                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M4 10.5l8-6 8 6M6.5 9.75V19.5a1 1 0 001 1h9a1 1 0 001-1V9.75M10 20v-5a1 1 0 011-1h2a1 1 0 011 1v5" />
+                  {backgroundDrawing && backgroundOpacity > 0 ? 'Dölj ritning' : 'Visa ritning'}
+                </button>
+              </div>
+
+              <div className="px-1.5 py-0.5">
+                <button
+                  type="button"
+                  onClick={() => { setShowGrid((prev) => !prev); setContextMenu(null); }}
+                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
+                >
+                  {showGrid ? 'Dölj stödraster' : 'Visa stödraster'}
+                </button>
+              </div>
+
+              <div className="my-1 border-t border-[#ECE7E3]" />
+
+              <div className="px-1.5 py-0.5">
+                <button
+                  type="button"
+                  onClick={() => { onResetDesign?.(); setContextMenu(null); }}
+                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#C41230] hover:bg-[#fff0f1] transition-colors flex items-center gap-1.5"
+                >
+                  <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" />
                   </svg>
-                  Visa hela
+                  <span>Återställ design</span>
                 </button>
               </div>
             </>

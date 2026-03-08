@@ -508,7 +508,6 @@ const App: React.FC = () => {
   const [historyByDesignId, setHistoryByDesignId] = useState<Record<string, DesignHistorySnapshot[]>>({});
   const [redoByDesignId, setRedoByDesignId] = useState<Record<string, DesignHistorySnapshot[]>>({});
   const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
-  const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [authReady, setAuthReady] = useState(false);
 
@@ -770,18 +769,6 @@ const App: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [designState.activeDesignId]);
 
-  useEffect(() => {
-    if (!isToolsPanelOpen) return;
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setIsToolsPanelOpen(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  }, [isToolsPanelOpen]);
 
   const updateDesignById = (designId: string, updater: (design: FloorDesign) => FloorDesign) => {
     setDesignState((prev) => ({
@@ -1619,16 +1606,18 @@ const App: React.FC = () => {
   };
 
   const handleReset = () => {
-    if (!window.confirm('Radera ritningen och bakgrundsritningen? Detta kan ångras med Undo.')) {
+    if (!window.confirm('Återställ design till standardläge? Detta kan ångras med Undo.')) {
       return;
     }
     recordActiveHistory();
     updateActiveDesign((design) => ({
       ...design,
-      points: [],
+      points: DEFAULT_FLOOR_POINTS.map((p) => ({ ...p })),
       offset: { ...DEFAULT_OFFSET },
       scale: DEFAULT_SCALE,
-      settings: { ...design.settings, originPointIdx: 0 },
+      settings: { ...INITIAL_SETTINGS },
+      products: [],
+      productSettingsById: {},
       activeProductId: null,
       productInfo: null,
       backgroundDrawing: null,
@@ -1662,7 +1651,7 @@ const App: React.FC = () => {
     const scaleH = availableH / (roomH || 1);
     const extentsScale = Math.min(scaleW, scaleH, 0.4) * 0.75 * 0.85;
     const newScale = Math.max(MIN_SCALE, extentsScale);
-    const leftShiftPx = isToolsPanelOpen ? canvas.clientWidth * 0.10 : 0;
+    const leftShiftPx = 0;
 
     const roomCenterX = (minX + maxX) / 2;
     const roomCenterY = (minY + maxY) / 2;
@@ -1695,10 +1684,15 @@ const App: React.FC = () => {
     setTimeout(() => handleZoomExtentsForDesign(currentDesignId, newPoints), 100);
   };
 
-  const handleAddDesign = () => {
-    setDesignState((prev) => {
-      if (prev.designs.length >= MAX_DESIGNS) return prev;
+  const [showDesignLimitMessage, setShowDesignLimitMessage] = useState(false);
 
+  const handleAddDesign = () => {
+    if (designState.designs.length >= MAX_DESIGNS) {
+      setShowDesignLimitMessage(true);
+      setTimeout(() => setShowDesignLimitMessage(false), 3000);
+      return;
+    }
+    setDesignState((prev) => {
       const newDesign = createDefaultDesign(getNextDesignName(prev.designs));
       return {
         designs: [...prev.designs, newDesign],
@@ -1838,113 +1832,6 @@ const App: React.FC = () => {
     setImportLaunchError('Filformat stöds inte. Välj PNG, JPG eller PDF.');
   };
 
-  const toolsPanelContent = (
-    <div className="space-y-2 rounded-2xl border border-[#aaaaaa] bg-white p-2.5">
-      <div className="space-y-1 border-[#e8e8e8]">
-        <p className="text-[9px] font-medium text-[#767676]">Bedömning</p>
-        <label className="block text-[9px] font-medium text-[#767676]">Mönsterkontrast</label>
-        <input
-          type="range"
-          min="0"
-          max="1"
-          step="0.1"
-          value={settings.visualContrast}
-          onChange={(event) => setActiveSettings({ ...settings, visualContrast: parseFloat(event.target.value) })}
-          className="kahrs-slider"
-        />
-      </div>
-
-      <div className="grid grid-cols-[1fr_1fr] items-center gap-2 border-t border-[#e8e8e8] pt-2">
-        <label className="text-[9px] font-medium text-[#767676]">Grid (mm)</label>
-        <input
-          type="number"
-          value={gridSize}
-          onChange={(event) => setGridSize(Math.max(10, parseInt(event.target.value, 10) || 10))}
-          className="pf-no-spin h-8 w-full border border-[#d9d9d9] bg-white px-2 text-right text-[10px] font-semibold text-[#1a1a1a] focus:border-[#C41230] focus:outline-none"
-        />
-      </div>
-
-
-      <div className="grid grid-cols-2 gap-2">
-        <button
-          type="button"
-          onClick={() => setShowEdgeLengths((prev) => !prev)}
-          className={`pf-action-heading rounded-full px-2 py-1.5 text-[10px] font-medium transition-colors ${
-            showEdgeLengths
-              ? 'border border-[#aaaaaa] bg-white text-[#333333]'
-              : 'bg-white text-[#666] hover:bg-[#f0f0f0]'
-          }`}
-        >
-          {showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
-        </button>
-        <button
-          type="button"
-          disabled={!backgroundDrawing}
-          onClick={handleToggleBackgroundDrawing}
-          className={`pf-action-heading rounded-full px-2 py-1.5 text-[10px] font-medium transition-colors ${
-            backgroundDrawing && showBackgroundDrawing
-              ? 'border border-[#aaaaaa] bg-white text-[#333333]'
-              : backgroundDrawing
-                ? 'bg-white text-[#666] hover:bg-[#f0f0f0]'
-                : 'cursor-not-allowed bg-white text-[#B0B0B0]'
-          }`}
-        >
-          {backgroundDrawing && showBackgroundDrawing ? 'Dölj ritning' : 'Visa ritning'}
-        </button>
-      </div>
-
-      <div className="space-y-1">
-        <div className="flex items-center justify-between">
-          <label className="text-[9px] font-medium text-[#666]">Opacitet ritning</label>
-          <span className="text-[10px] font-semibold text-[#1A1A1A]">{Math.round(backgroundOpacity * 100)}%</span>
-        </div>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          step="1"
-          value={Math.round(backgroundOpacity * 100)}
-          disabled={!backgroundDrawing}
-          onChange={(event) => handleBackgroundOpacityChange((parseInt(event.target.value, 10) || 0) / 100)}
-          className="kahrs-slider disabled:opacity-40"
-        />
-      </div>
-
-      <button
-        type="button"
-        onClick={handleReset}
-        className="pf-action-heading flex w-full items-center justify-center gap-1.5 rounded-full py-1.5 px-2 text-[10px] font-medium text-[#C41230] bg-[#fff5f6] transition-colors hover:bg-[#ffe8eb]"
-        aria-label="Återställ design"
-        title="Återställ design"
-      >
-        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" /></svg>
-        <span>Återställ design</span>
-      </button>
-
-      <div className="flex items-center gap-1 border-t border-[#e8e8e8] pt-2">
-        <button
-          type="button"
-          onClick={handleUndo}
-          disabled={!canUndo}
-          className="flex h-8 w-full items-center justify-center rounded-full bg-white text-[#4a4a4a] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] disabled:cursor-not-allowed disabled:opacity-45"
-          title="Undo (Cmd/Ctrl+Z)"
-          aria-label="Undo"
-        >
-          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M9 7H5v4M5 11c1.5-3.2 4.6-5 8.2-5 5 0 8.8 3.9 8.8 8.8" /></svg>
-        </button>
-        <button
-          type="button"
-          onClick={handleRedo}
-          disabled={!canRedo}
-          className="flex h-8 w-full items-center justify-center rounded-full bg-white text-[#4a4a4a] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] disabled:cursor-not-allowed disabled:opacity-45"
-          title="Redo (Cmd/Ctrl+Shift+Z / Ctrl+Y)"
-          aria-label="Redo"
-        >
-          <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M15 7h4v4M19 11c-1.5-3.2-4.6-5-8.2-5C5.8 6 2 9.9 2 14.8" /></svg>
-        </button>
-      </div>
-    </div>
-  );
 
   const contentColumns = 'grid-cols-[var(--pf-sidebar-w)_minmax(0,1fr)_0px]';
   const topbarColumns = 'grid-cols-[var(--pf-topbar-sidebar-w)_minmax(0,1fr)_0px]';
@@ -2091,16 +1978,22 @@ const App: React.FC = () => {
 
                   <div className="h-[22px] self-end w-px bg-[#d9d9d9]"></div>
 
-                  <button
-                    type="button"
-                    onClick={handleAddDesign}
-                    disabled={isDesignLimitReached}
-                    className="flex self-end h-9 w-9 items-center justify-center text-[22px] leading-none text-[#767676] transition-colors hover:bg-[#f0f0f0] hover:text-[#4a4a4a] disabled:cursor-not-allowed disabled:opacity-40"
-                    title={isDesignLimitReached ? DESIGN_LIMIT_MESSAGE : 'Lägg till nytt golv'}
-                    aria-label="Lägg till nytt golv"
-                  >
-                    +
-                  </button>
+                  <div className="relative flex self-end items-center">
+                    <button
+                      type="button"
+                      onClick={handleAddDesign}
+                      className="flex h-9 w-9 items-center justify-center text-[22px] leading-none text-[#767676] transition-colors hover:text-[#4a4a4a]"
+                      title="Lägg till nytt golv"
+                      aria-label="Lägg till nytt golv"
+                    >
+                      +
+                    </button>
+                    {showDesignLimitMessage && (
+                      <div className="absolute bottom-full left-1/2 mb-[-3px] -translate-x-1/2 whitespace-nowrap rounded-full border border-[#d9d9d9] bg-white px-3 py-1.5 text-[10px] font-medium text-[#767676] shadow-sm">
+                        Max 3 designer samtidigt
+                      </div>
+                    )}
+                  </div>
 
                   {/* Sparade golv tab */}
                   <div className="h-[22px] self-end w-px bg-[#d9d9d9]"></div>
@@ -2351,17 +2244,8 @@ const App: React.FC = () => {
             })()}
 
             <div className="relative h-full min-h-0 min-w-0">
-              {/* Left: zoom controls */}
-              <div className="absolute left-3 top-3 z-30 flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleZoomStep(-1)}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[18px] leading-none text-[#767676] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a]"
-                  title="Zooma ut"
-                  aria-label="Zooma ut"
-                >
-                  −
-                </button>
+              {/* Right side: vertical zoom controls, centered */}
+              <div className="absolute right-3 z-30 flex flex-col items-center gap-1.5" style={{ top: 'calc(50% - 60px)', transform: 'translateY(-50%)' }}>
                 <button
                   type="button"
                   onClick={() => handleZoomStep(1)}
@@ -2374,18 +2258,26 @@ const App: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleZoomExtents()}
-                  className="pf-action-heading flex h-8 items-center gap-1.5 rounded-full border border-[#d9d9d9] bg-white px-3 text-[#767676] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
-                  title="Zooma till extents"
-                  aria-label="Zooma till extents"
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#767676] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
+                  title="Visa hela"
+                  aria-label="Visa hela"
                 >
                   <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M4 10.5l8-6 8 6M6.5 9.75V19.5a1 1 0 001 1h9a1 1 0 001-1V9.75M10 20v-5a1 1 0 011-1h2a1 1 0 011 1v5" />
                   </svg>
-                  <span className="whitespace-nowrap font-medium">Visa hela</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleZoomStep(-1)}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[18px] leading-none text-[#767676] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a]"
+                  title="Zooma ut"
+                  aria-label="Zooma ut"
+                >
+                  −
                 </button>
               </div>
 
-              {/* Right: import, save, menu */}
+              {/* Right: import, save, undo/redo */}
               <div className="absolute right-3 top-3 z-30 flex items-center gap-2">
                 <input
                   ref={importInputRef}
@@ -2397,6 +2289,26 @@ const App: React.FC = () => {
                     event.currentTarget.value = '';
                   }}
                 />
+                <button
+                  type="button"
+                  onClick={handleUndo}
+                  disabled={!canUndo}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
+                  title="Ångra (Cmd/Ctrl+Z)"
+                  aria-label="Ångra"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M9 7H5v4M5 11c1.5-3.2 4.6-5 8.2-5 5 0 8.8 3.9 8.8 8.8" /></svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRedo}
+                  disabled={!canRedo}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
+                  title="Gör om (Cmd/Ctrl+Shift+Z)"
+                  aria-label="Gör om"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M15 7h4v4M19 11c-1.5-3.2-4.6-5-8.2-5C5.8 6 2 9.9 2 14.8" /></svg>
+                </button>
                 <button
                   type="button"
                   onClick={() => importInputRef.current?.click()}
@@ -2485,15 +2397,6 @@ const App: React.FC = () => {
                     {isSaving ? 'Sparar…' : saveDone ? 'Sparat!' : 'Spara'}
                   </span>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => setIsToolsPanelOpen((prev) => !prev)}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
-                  aria-label="Visa canvasverktyg"
-                  title="Canvasverktyg"
-                >
-                  <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M4 7h16M4 12h16M4 17h16" /></svg>
-                </button>
               </div>
 
               {importLaunchError && (
@@ -2526,16 +2429,12 @@ const App: React.FC = () => {
                 onBackgroundOpacityChange={handleBackgroundOpacityChange}
                 onRemoveBackgroundDrawing={handleRemoveBackgroundDrawing}
                 onZoomExtents={handleZoomExtents}
+                onResetDesign={handleReset}
                 showFloatingToolPanel={false}
                 stats={stats}
                 productInfo={productInfo}
               />
 
-              {isToolsPanelOpen && (
-                <div className="absolute right-3 top-12 z-30 max-h-[calc(100%-60px)] w-[11.5rem] max-w-[calc(100%-1.5rem)] overflow-y-auto">
-                  {toolsPanelContent}
-                </div>
-              )}
             </div>
           </main>
 
