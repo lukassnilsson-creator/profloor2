@@ -1651,7 +1651,7 @@ const App: React.FC = () => {
     const scaleH = availableH / (roomH || 1);
     const extentsScale = Math.min(scaleW, scaleH, 0.4) * 0.75 * 0.85;
     const newScale = Math.max(MIN_SCALE, extentsScale);
-    const leftShiftPx = 0;
+    const leftShiftPx = canvas.clientWidth * 0.05;
 
     const roomCenterX = (minX + maxX) / 2;
     const roomCenterY = (minY + maxY) / 2;
@@ -1770,7 +1770,8 @@ const App: React.FC = () => {
     const currentPercent = Math.round(scale * 1000);
     const nextPercent = Math.max(MIN_ZOOM_PERCENT, Math.min(MAX_ZOOM_PERCENT, currentPercent + direction * 10));
     const nextScale = nextPercent / 1000;
-    setActiveView(nextScale, centerOffsetForPoints(points, nextScale));
+    const ratio = nextScale / scale;
+    setActiveView(nextScale, { x: offset.x * ratio, y: offset.y * ratio });
     setZoomPercentInput(String(nextPercent));
   };
 
