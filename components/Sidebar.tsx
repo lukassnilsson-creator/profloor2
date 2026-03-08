@@ -374,18 +374,21 @@ const Sidebar: React.FC<SidebarProps> = ({
                             </svg>
                           </button>
                           {isExpanded && (
-                            <div className="px-4 py-2.5 grid grid-cols-2 gap-x-4 gap-y-1.5 border-t border-[#EAE6E3] bg-[#fafafa]">
+                            <div className="px-4 py-2 flex items-center gap-3 border-t border-[#EAE6E3] bg-[#fafafa] overflow-x-auto">
                               {[
                                 { label: 'Längd', value: `${product.lengthMm} mm` },
                                 { label: 'Bredd', value: `${product.widthMm} mm` },
                                 ...(product.thicknessMm ? [{ label: 'Tjocklek', value: `${product.thicknessMm} mm` }] : []),
                                 { label: 'St/förp.', value: `${product.planksPerPackage} st` },
                                 ...(packageAreaFormatted ? [{ label: 'm²/förp.', value: `${packageAreaFormatted} m²` }] : []),
-                              ].map(({ label, value }) => (
-                                <div key={label} className="flex justify-between items-baseline">
-                                  <span className="text-[8px] text-[#9A9A9A] font-medium">{label}</span>
-                                  <span className="text-[8px] font-semibold text-[#1a1a1a]">{value}</span>
-                                </div>
+                              ].map(({ label, value }, i, arr) => (
+                                <React.Fragment key={label}>
+                                  <div className="flex flex-col items-center flex-shrink-0">
+                                    <span className="text-[7px] text-[#9A9A9A] font-medium whitespace-nowrap">{label}</span>
+                                    <span className="text-[9px] font-semibold text-[#1a1a1a] whitespace-nowrap">{value}</span>
+                                  </div>
+                                  {i < arr.length - 1 && <div className="w-px self-stretch bg-[#EAE6E3] flex-shrink-0" />}
+                                </React.Fragment>
                               ))}
                             </div>
                           )}
