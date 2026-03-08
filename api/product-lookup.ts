@@ -126,24 +126,41 @@ const mapAvailability = (url: string): string => {
   return url;
 };
 
+const toAbsolute = (src: string, baseUrl?: string): string | null => {
+  const s = src.trim();
+  if (s.startsWith('http')) return s;
+  if (baseUrl && s.startsWith('/')) {
+    try { return new URL(s, baseUrl).href; } catch { /* skip */ }
+  }
+  return null;
+};
+
 const extractOgImage = (html: string, baseUrl?: string): string | null => {
-  const patterns = [
+  // meta tag patterns
+  const metaPatterns = [
     /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+    /<meta[^>]+property=["']og:image:secure_url["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image:secure_url["']/i,
     /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i,
   ];
-  for (const p of patterns) {
+  for (const p of metaPatterns) {
     const m = html.match(p);
     if (m?.[1]) {
-      const src = m[1].trim();
-      if (src.startsWith('http')) return src;
-      if (baseUrl && src.startsWith('/')) {
-        try { return new URL(src, baseUrl).href; } catch { /* skip */ }
-      }
-      return src;
+      const abs = toAbsolute(m[1], baseUrl);
+      if (abs) return abs;
     }
   }
+
+  // itemprop="image" microdata
+  const microdata = html.match(/itemprop=["']image["'][^>]+content=["']([^"']+)["']/i)
+    ?? html.match(/content=["']([^"']+)["'][^>]+itemprop=["']image["']/i);
+  if (microdata?.[1]) {
+    const abs = toAbsolute(microdata[1], baseUrl);
+    if (abs) return abs;
+  }
+
   return null;
 };
 
@@ -294,6 +311,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         ? (Array.isArray(jsonLd.image) ? jsonLd.image[0] : jsonLd.image)
         : null;
       const imageUrl = ogImage ?? (typeof jsonLdImage === 'string' && jsonLdImage ? jsonLdImage : null);
+      console.log('[product-lookup] image sources:', { url: productUrl, ogImage, jsonLdImage, imageUrl });
       const productText = extractRelevantText(html);
 
       const offer = jsonLd?.offers
