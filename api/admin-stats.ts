@@ -141,11 +141,6 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       }
     }
 
-    const topStores = Object.entries(productUrlCounts)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 10)
-      .map(([store, count]) => ({ store, count }));
-
     // ── Event aggregations ────────────────────────────────────────────────────
     const loginCountByUser: Record<string, number> = {};
     for (const e of events) {
@@ -157,6 +152,12 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         productUrlCounts[e.value] = (productUrlCounts[e.value] ?? 0) + 1;
       }
     }
+
+    // Build topStores AFTER merging events so all fetches (incl. anonymous) are included
+    const topStores = Object.entries(productUrlCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 10)
+      .map(([store, count]) => ({ store, count }));
 
     const totalBackgroundUploads = events.filter((e) => e.event_type === 'background_uploaded').length;
     const totalPlanCancellations = events.filter((e) => e.event_type === 'plan_cancelled').length;

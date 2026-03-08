@@ -126,10 +126,25 @@ const mapAvailability = (url: string): string => {
   return url;
 };
 
-const extractOgImage = (html: string): string | null => {
-  const m = html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i)
-    ?? html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
-  return m?.[1] ?? null;
+const extractOgImage = (html: string, baseUrl?: string): string | null => {
+  const patterns = [
+    /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
+    /<meta[^>]+name=["']twitter:image["'][^>]+content=["']([^"']+)["']/i,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']twitter:image["']/i,
+  ];
+  for (const p of patterns) {
+    const m = html.match(p);
+    if (m?.[1]) {
+      const src = m[1].trim();
+      if (src.startsWith('http')) return src;
+      if (baseUrl && src.startsWith('/')) {
+        try { return new URL(src, baseUrl).href; } catch { /* skip */ }
+      }
+      return src;
+    }
+  }
+  return null;
 };
 
 // ─── Text extraction for Gemini ───────────────────────────────────────────────
@@ -273,7 +288,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     if (html) {
       const jsonLd = extractJsonLd(html);
-      const imageUrl = extractOgImage(html);
+      const imageUrl = extractOgImage(html, productUrl);
       const productText = extractRelevantText(html);
 
       const offer = jsonLd?.offers
@@ -339,7 +354,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         const data = await extractWithGeminiSearch(ai, productUrl);
 
         if (!data.imageUrl && html) {
-          data.imageUrl = extractOgImage(html);
+          data.imageUrl = extractOgImage(html, productUrl);
         }
 
         return res.status(200).json(data);
