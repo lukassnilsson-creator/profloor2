@@ -11,12 +11,13 @@ function getSessionId(): string {
 
 export async function logEvent(eventType: string, userId?: string | null) {
   try {
-    await supabase.from('app_events').insert({
+    const { error } = await supabase.from('app_events').insert({
       event_type: eventType,
       user_id: userId ?? null,
       session_id: getSessionId(),
     });
-  } catch {
-    // Silent fail — analytics must never break the app
+    if (error) console.error('[analytics] logEvent error:', eventType, error.message);
+  } catch (err) {
+    console.error('[analytics] logEvent exception:', eventType, err);
   }
 }

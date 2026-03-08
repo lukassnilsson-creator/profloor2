@@ -510,10 +510,12 @@ const App: React.FC = () => {
   const [tabContextMenu, setTabContextMenu] = useState<TabContextMenuState | null>(null);
   const [isToolsPanelOpen, setIsToolsPanelOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
+      setAuthReady(true);
     });
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
@@ -704,13 +706,14 @@ const App: React.FC = () => {
   }, [tabContextMenu]);
 
   // Track when an anonymous user makes their first floor design this session
+  // Wait for authReady so we don't fire before we know if the user is logged in
   useEffect(() => {
-    if (user || anonymousFloorLoggedRef.current) return;
+    if (!authReady || user || anonymousFloorLoggedRef.current) return;
     if (activeDesign.points.length > 0) {
       anonymousFloorLoggedRef.current = true;
       logEvent('floor_designed_anonymous');
     }
-  }, [user, activeDesign.points.length]);
+  }, [authReady, user, activeDesign.points.length]);
 
   // Background refresh: when switching tabs, silently update price/stock for stale products
   const refreshingProductIds = useRef(new Set<string>());
