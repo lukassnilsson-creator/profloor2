@@ -214,8 +214,9 @@ const extractWithGeminiSearch = async (
     model: 'gemini-2.5-flash',
     contents: `Search for this flooring product page and extract its technical specifications: ${productUrl}.
     Return ONLY a JSON object with these fields (no markdown, no explanation):
-    {"productName":"...","lengthMm":0,"widthMm":0,"planksPerPackage":0,"pricePerPackage":0,"currency":"SEK","stockStatus":"...","deliveryEstimate":"...","isCampaignPrice":false}
-    Use Swedish context. Extract the price per package (förpackning), not per m².`,
+    {"productName":"...","lengthMm":0,"widthMm":0,"planksPerPackage":0,"pricePerPackage":0,"currency":"SEK","stockStatus":"...","deliveryEstimate":"...","isCampaignPrice":false,"imageUrl":"..."}
+    Use Swedish context. Extract the price per package (förpackning), not per m².
+    For imageUrl: return the main product image URL from the page (og:image or similar). Return empty string if not found.`,
     config: {
       tools: [{ googleSearch: {} }],
     },

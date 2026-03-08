@@ -1,6 +1,7 @@
 
 import React, { useEffect, useRef, useState } from 'react';
 import { PlankSettings, SavedProduct, Stats } from '../types';
+import { logEvent } from '../lib/analytics';
 
 interface SidebarProps {
   settings: PlankSettings;
@@ -156,6 +157,11 @@ const Sidebar: React.FC<SidebarProps> = ({
 
       onAddProduct(fetchedProduct, targetDesignId);
       setProductUrl('');
+
+      try {
+        const hostname = new URL(normalizedUrl).hostname.replace(/^www\./, '');
+        logEvent('product_fetched', null, hostname);
+      } catch { /* invalid URL, skip */ }
 
     } catch (error) {
       console.error("Failed to fetch product data", error);

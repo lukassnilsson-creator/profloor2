@@ -68,7 +68,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }),
       supabaseAdmin.from('saved_floors').select('id, user_id, created_at, data'),
       supabaseAdmin.from('shared_floors').select('id, created_by, created_at'),
-      supabaseAdmin.from('app_events').select('event_type, user_id, session_id, created_at'),
+      supabaseAdmin.from('app_events').select('event_type, user_id, session_id, value, created_at'),
     ]);
 
     if (authUsersResult.error) throw authUsersResult.error;
@@ -151,6 +151,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     for (const e of events) {
       if (e.event_type === 'login' && e.user_id) {
         loginCountByUser[e.user_id] = (loginCountByUser[e.user_id] ?? 0) + 1;
+      }
+      // Merge product_fetched events into productUrlCounts (catches anonymous + unsaved fetches)
+      if (e.event_type === 'product_fetched' && typeof e.value === 'string' && e.value) {
+        productUrlCounts[e.value] = (productUrlCounts[e.value] ?? 0) + 1;
       }
     }
 
