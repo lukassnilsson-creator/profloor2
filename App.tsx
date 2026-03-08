@@ -16,6 +16,7 @@ import {
 import { calculateLayout } from './flooringEngine';
 import { getPolygonArea, getBoundingBox } from './geometry';
 import { supabase } from './lib/supabase';
+import { logEvent } from './lib/analytics';
 import type { User } from '@supabase/supabase-js';
 
 const INITIAL_SETTINGS: PlankSettings = {
@@ -514,8 +515,11 @@ const App: React.FC = () => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       setUser(session?.user ?? null);
+      if (event === 'SIGNED_IN' && session?.user) {
+        logEvent('login', session.user.id);
+      }
     });
     return () => subscription.unsubscribe();
   }, []);
@@ -529,6 +533,7 @@ const App: React.FC = () => {
   const [savedFloorsLoading, setSavedFloorsLoading] = useState(false);
   const [pendingCloseDesignId, setPendingCloseDesignId] = useState<string | null>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
+  const anonymousFloorLoggedRef = useRef(false);
   const [isManualActive, setIsManualActive] = useState(false);
   const [manualFloorSettings, setManualFloorSettings] = useState({
     length: INITIAL_SETTINGS.length,
@@ -697,6 +702,15 @@ const App: React.FC = () => {
     window.addEventListener('click', closeContextMenu);
     return () => window.removeEventListener('click', closeContextMenu);
   }, [tabContextMenu]);
+
+  // Track when an anonymous user makes their first floor design this session
+  useEffect(() => {
+    if (user || anonymousFloorLoggedRef.current) return;
+    if (activeDesign.points.length > 0) {
+      anonymousFloorLoggedRef.current = true;
+      logEvent('floor_designed_anonymous');
+    }
+  }, [user, activeDesign.points.length]);
 
   // Background refresh: when switching tabs, silently update price/stock for stale products
   const refreshingProductIds = useRef(new Set<string>());
@@ -1815,6 +1829,7 @@ const App: React.FC = () => {
       setImportLaunchError(null);
       setImportFile(file);
       setIsImporting(true);
+      logEvent('background_uploaded', user?.id);
       return;
     }
     setImportLaunchError('Filformat stöds inte. Välj PNG, JPG eller PDF.');
@@ -2547,6 +2562,7 @@ const App: React.FC = () => {
               setIsImporting(false);
               setImportFile(null);
             }}
+            onAnalysisCancelled={() => logEvent('plan_cancelled', user?.id)}
           />
         )}
       </div>

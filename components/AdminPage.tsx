@@ -8,7 +8,9 @@ interface UserRow {
   createdAt: string;
   lastSignIn: string | null;
   lastSave: string | null;
+  lastActivity: string | null;
   savedFloorCount: number;
+  loginCount: number;
 }
 
 interface StoreEntry {
@@ -23,6 +25,12 @@ interface ShareEntry {
   userEmail: string | null;
 }
 
+interface TimeSeries {
+  labels: string[];
+  users: number[];
+  floors: number[];
+}
+
 interface Stats {
   totalUsers: number;
   totalSavedFloors: number;
@@ -30,7 +38,14 @@ interface Stats {
   sharedByLoggedIn: number;
   sharedByAnonymous: number;
   avgFloorAreaM2: string | null;
+  avgWastePercent: string | null;
+  avgProductsPerFloor: string | null;
+  floorsWithProductPercent: number;
+  avgPointsPerFloor: string | null;
   activeUsersLast30Days: number;
+  totalBackgroundUploads: number;
+  totalPlanCancellations: number;
+  anonymousFloorSessions: number;
 }
 
 interface AdminData {
@@ -38,6 +53,7 @@ interface AdminData {
   stats: Stats;
   topStores: StoreEntry[];
   recentShares: ShareEntry[];
+  timeSeries: TimeSeries;
 }
 
 const fmt = (iso: string | null) => {
@@ -53,6 +69,57 @@ const StatCard = ({ label, value, sub }: { label: string; value: string | number
     {sub && <p className="text-[9px] text-[#9a9a9a] mt-1">{sub}</p>}
   </div>
 );
+
+// Simple SVG line chart
+const LineChart = ({ labels, series }: {
+  labels: string[];
+  series: { label: string; values: number[]; color: string }[];
+}) => {
+  const W = 600;
+  const H = 120;
+  const PAD = { top: 10, right: 16, bottom: 28, left: 28 };
+  const chartW = W - PAD.left - PAD.right;
+  const chartH = H - PAD.top - PAD.bottom;
+
+  const allValues = series.flatMap((s) => s.values);
+  const maxVal = Math.max(...allValues, 1);
+
+  const toX = (i: number) => PAD.left + (i / Math.max(labels.length - 1, 1)) * chartW;
+  const toY = (v: number) => PAD.top + chartH - (v / maxVal) * chartH;
+
+  const makePath = (values: number[]) =>
+    values.map((v, i) => `${i === 0 ? 'M' : 'L'}${toX(i).toFixed(1)},${toY(v).toFixed(1)}`).join(' ');
+
+  const gridLines = [0, 0.5, 1].map((f) => Math.round(maxVal * f));
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }}>
+      {gridLines.map((v) => (
+        <g key={v}>
+          <line
+            x1={PAD.left} y1={toY(v).toFixed(1)}
+            x2={W - PAD.right} y2={toY(v).toFixed(1)}
+            stroke="#f0f0f0" strokeWidth="1"
+          />
+          <text x={PAD.left - 4} y={toY(v)} dy="0.35em" textAnchor="end" fontSize="7" fill="#c0c0c0">{v}</text>
+        </g>
+      ))}
+      {series.map((s) => (
+        <path key={s.label} d={makePath(s.values)} fill="none" stroke={s.color} strokeWidth="1.5" strokeLinejoin="round" />
+      ))}
+      {series.map((s) =>
+        s.values.map((v, i) => (
+          <circle key={`${s.label}-${i}`} cx={toX(i)} cy={toY(v)} r="2.5" fill={s.color} />
+        ))
+      )}
+      {labels.map((l, i) =>
+        i % 2 === 0 ? (
+          <text key={i} x={toX(i)} y={H - 4} textAnchor="middle" fontSize="7" fill="#b0b0b0">{l}</text>
+        ) : null
+      )}
+    </svg>
+  );
+};
 
 export default function AdminPage() {
   const [authUser, setAuthUser] = useState<User | null>(null);
@@ -169,7 +236,7 @@ export default function AdminPage() {
 
   if (!data) return null;
 
-  const { stats, users, topStores, recentShares } = data;
+  const { stats, users, topStores, recentShares, timeSeries } = data;
 
   // ── Dashboard ─────────────────────────────────────────────────────────────
   return (
@@ -193,7 +260,7 @@ export default function AdminPage() {
 
       <main className="max-w-6xl mx-auto px-8 py-8 space-y-8">
 
-        {/* Stat cards */}
+        {/* Stat cards — row 1: users & traffic */}
         <section>
           <h2 className="text-[11px] font-semibold text-[#9a9a9a] uppercase tracking-wide mb-3">Översikt</h2>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -204,11 +271,79 @@ export default function AdminPage() {
               value={stats.totalSharedFloors}
               sub={`${stats.sharedByLoggedIn} inloggade · ${stats.sharedByAnonymous} anonyma`}
             />
+            <StatCard
+              label="Anonyma designers"
+              value={stats.anonymousFloorSessions}
+              sub="unika sessioner med golvdesign"
+            />
+          </div>
+        </section>
+
+        {/* Stat cards — row 2: floor quality */}
+        <section>
+          <h2 className="text-[11px] font-semibold text-[#9a9a9a] uppercase tracking-wide mb-3">Golvkvalitet</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {stats.avgFloorAreaM2 && (
               <StatCard label="Snitt golvarea" value={`${stats.avgFloorAreaM2} m²`} />
             )}
+            {stats.avgWastePercent && (
+              <StatCard label="Snitt spillprocent" value={`${stats.avgWastePercent}%`} />
+            )}
+            {stats.avgProductsPerFloor && (
+              <StatCard
+                label="Snitt produkter/golv"
+                value={stats.avgProductsPerFloor}
+                sub={`${stats.floorsWithProductPercent}% av golv har produkt`}
+              />
+            )}
+            {stats.avgPointsPerFloor && (
+              <StatCard label="Snitt punkter/golv" value={stats.avgPointsPerFloor} sub="polygonkomplexitet" />
+            )}
           </div>
         </section>
+
+        {/* Stat cards — row 3: ritnings-AI */}
+        <section>
+          <h2 className="text-[11px] font-semibold text-[#9a9a9a] uppercase tracking-wide mb-3">Ritnings-AI</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard label="Bakgrundsritningar" value={stats.totalBackgroundUploads} sub="uppladdade totalt" />
+            <StatCard
+              label="Avbrutna tolkningar"
+              value={stats.totalPlanCancellations}
+              sub={
+                stats.totalBackgroundUploads > 0
+                  ? `${Math.round((stats.totalPlanCancellations / stats.totalBackgroundUploads) * 100)}% avbrottsgrad`
+                  : undefined
+              }
+            />
+          </div>
+        </section>
+
+        {/* Time series chart */}
+        {timeSeries && (
+          <section>
+            <h2 className="text-[11px] font-semibold text-[#9a9a9a] uppercase tracking-wide mb-3">Tillväxt (senaste 12 veckor)</h2>
+            <div className="bg-white rounded-xl border border-[#e5e5e5] px-5 pt-4 pb-3">
+              <div className="flex items-center gap-5 mb-3">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-0.5 rounded bg-[#C41230] inline-block" />
+                  <span className="text-[9px] text-[#767676]">Nya användare</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="w-3 h-0.5 rounded bg-[#1a1a1a] inline-block" />
+                  <span className="text-[9px] text-[#767676]">Sparade golv</span>
+                </div>
+              </div>
+              <LineChart
+                labels={timeSeries.labels}
+                series={[
+                  { label: 'Användare', values: timeSeries.users, color: '#C41230' },
+                  { label: 'Golv', values: timeSeries.floors, color: '#1a1a1a' },
+                ]}
+              />
+            </div>
+          </section>
+        )}
 
         {/* Users table */}
         <section>
@@ -219,7 +354,7 @@ export default function AdminPage() {
             <table className="w-full text-left">
               <thead>
                 <tr className="border-b border-[#f0f0f0]">
-                  {['E-post', 'Registrerad', 'Senaste inloggning', 'Senaste sparning', 'Sparade golv'].map((h) => (
+                  {['E-post', 'Registrerad', 'Senaste aktivitet', 'Inloggningar', 'Sparade golv'].map((h) => (
                     <th key={h} className="px-4 py-2.5 text-[9px] font-semibold text-[#9a9a9a] uppercase tracking-wide">
                       {h}
                     </th>
@@ -231,8 +366,12 @@ export default function AdminPage() {
                   <tr key={u.id} className={`border-b border-[#f5f5f5] ${i % 2 === 0 ? '' : 'bg-[#fafafa]'}`}>
                     <td className="px-4 py-2.5 text-[10px] font-medium text-[#1a1a1a]">{u.email}</td>
                     <td className="px-4 py-2.5 text-[10px] text-[#767676]">{fmt(u.createdAt)}</td>
-                    <td className="px-4 py-2.5 text-[10px] text-[#767676]">{fmt(u.lastSignIn)}</td>
-                    <td className="px-4 py-2.5 text-[10px] text-[#767676]">{fmt(u.lastSave)}</td>
+                    <td className="px-4 py-2.5 text-[10px] text-[#767676]">{fmt(u.lastActivity)}</td>
+                    <td className="px-4 py-2.5 text-[10px]">
+                      <span className={`font-semibold ${u.loginCount > 0 ? 'text-[#1a1a1a]' : 'text-[#9a9a9a]'}`}>
+                        {u.loginCount > 0 ? u.loginCount : '–'}
+                      </span>
+                    </td>
                     <td className="px-4 py-2.5 text-[10px]">
                       <span className={`font-semibold ${u.savedFloorCount > 0 ? 'text-[#1a1a1a]' : 'text-[#9a9a9a]'}`}>
                         {u.savedFloorCount}
@@ -296,8 +435,7 @@ export default function AdminPage() {
         </div>
 
         <p className="text-[9px] text-[#c0c0c0] text-center pb-4">
-          * Antal inloggningar per användare spåras inte ännu — bara senaste inloggningstidpunkt visas.
-          Lägg till ett login-event i Supabase för att aktivera den statistiken.
+          * Inloggningsräknaren börjar från när spårningen aktiverades — historiska inloggningar syns inte.
         </p>
       </main>
     </div>

@@ -9,6 +9,7 @@ interface ImportWizardProps {
   initialFile: File | null;
   onComplete: (points: Point[], backgroundDrawing: ImportedDrawingBackground | null) => void;
   onCancel: () => void;
+  onAnalysisCancelled?: () => void;
 }
 
 interface AISuggestion {
@@ -31,7 +32,7 @@ interface ContextMenu {
 // Must match --pf-sidebar-w in index.css
 const SIDEBAR_W = 400;
 
-const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, onCancel }) => {
+const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, onCancel, onAnalysisCancelled }) => {
   const [step, setStep] = useState<'analyze' | 'refine'>('analyze');
   const [image, setImage] = useState<string | null>(null);
   const [detectedPoints, setDetectedPoints] = useState<Point[]>([]);
@@ -318,7 +319,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
               <p className="text-[9px] text-[#A0A0A0] uppercase tracking-widest mt-0.5">Automatisk tolkning av planlösning</p>
             </div>
             <button
-              onClick={onCancel}
+              onClick={() => { if (step === 'analyze') onAnalysisCancelled?.(); onCancel(); }}
               className="pf-action-heading text-[9px] font-bold uppercase tracking-widest text-[#A0A0A0] hover:text-[#1A1A1A] transition-colors"
             >
               Avbryt
