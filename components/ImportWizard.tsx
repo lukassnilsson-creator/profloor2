@@ -330,13 +330,13 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
           <div className="flex-1 min-h-0 relative overflow-hidden flex items-center justify-center">
 
             {step === 'analyze' && (
-              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                {/* Skeleton floor outline background */}
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-6">
+                {/* Skeleton floor outline */}
                 <svg
                   width="280" height="190"
                   viewBox="0 0 280 190"
                   fill="none"
-                  className="absolute opacity-[0.12] animate-pulse"
+                  className="flex-shrink-0 opacity-[0.15] animate-pulse"
                   aria-hidden="true"
                 >
                   {/* L-shaped room outline */}
@@ -360,7 +360,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
                 </svg>
 
                 {!analysisError && (
-                  <div className="relative z-10 text-center space-y-5 px-6 max-w-sm">
+                  <div className="text-center space-y-5 px-6 max-w-sm">
                     <div className="relative w-14 h-14 mx-auto flex items-center justify-center">
                       <div className="absolute inset-0 border-2 border-[#D2B7AC]/20 rounded-full" />
                       <div className="absolute inset-0 border-2 border-[#D2B7AC] border-t-transparent rounded-full animate-spin" />
@@ -376,7 +376,7 @@ const ImportWizard: React.FC<ImportWizardProps> = ({ initialFile, onComplete, on
                 )}
 
                 {analysisError && (
-                  <div className="relative z-10 text-center space-y-3 max-w-sm px-6">
+                  <div className="text-center space-y-3 max-w-sm px-6">
                     <p className="text-[10px] font-bold uppercase tracking-widest text-red-600">Kunde inte tolka ritningen</p>
                     <p className="text-[10px] text-[#666] leading-relaxed">{analysisError}</p>
                     <button

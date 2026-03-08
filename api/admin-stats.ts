@@ -129,6 +129,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
       // Summary
       if (isRecord(data.summary)) {
+        // areaMm2 field is actually stored in m² (Stats.area is m²)
         if (typeof data.summary.areaMm2 === 'number' && data.summary.areaMm2 > 0) {
           totalAreaMm2 += data.summary.areaMm2;
           floorsWithArea++;
@@ -197,7 +198,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     // ── Derived averages ──────────────────────────────────────────────────────
     const avgAreaM2 =
-      floorsWithArea > 0 ? (totalAreaMm2 / floorsWithArea / 1_000_000).toFixed(2) : null;
+      floorsWithArea > 0 ? (totalAreaMm2 / floorsWithArea).toFixed(2) : null;
     const avgWastePercent =
       floorsWithWaste > 0 ? (totalWastePercent / floorsWithWaste).toFixed(1) : null;
     const avgProductsPerFloor =
