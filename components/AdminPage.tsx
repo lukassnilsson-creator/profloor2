@@ -112,7 +112,7 @@ export default function AdminPage() {
     setSigningIn(true);
     await supabase.auth.signInWithOAuth({
       provider: 'google',
-      options: { redirectTo: window.location.href },
+      options: { redirectTo: window.location.origin + '/adminsida' },
     });
   };
 

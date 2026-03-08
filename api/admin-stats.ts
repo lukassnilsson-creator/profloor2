@@ -58,7 +58,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     // ── Fetch all data in parallel ────────────────────────────────────────────
     const [authUsersResult, savedFloorsResult, sharedFloorsResult] = await Promise.all([
       supabaseAdmin.auth.admin.listUsers({ perPage: 1000 }),
-      supabaseAdmin.from('saved_floors').select('id, user_id, created_at, updated_at, floor_data'),
+      supabaseAdmin.from('saved_floors').select('id, user_id, created_at, floor_data'),
       supabaseAdmin.from('shared_floors').select('id, created_by, created_at'),
     ]);
 
@@ -77,7 +77,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     for (const floor of savedFloors) {
       if (floor.user_id) {
         savedFloorsByUser[floor.user_id] = (savedFloorsByUser[floor.user_id] ?? 0) + 1;
-        const ts = floor.updated_at ?? floor.created_at;
+        const ts = floor.created_at;
         if (!lastSaveByUser[floor.user_id] || ts > lastSaveByUser[floor.user_id]) {
           lastSaveByUser[floor.user_id] = ts;
         }
@@ -163,7 +163,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       recentShares,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = err instanceof Error
+      ? err.message
+      : (isRecord(err) && typeof err.message === 'string' ? err.message : JSON.stringify(err));
     console.error('admin-stats error:', msg);
     return res.status(500).json({ error: msg });
   }
