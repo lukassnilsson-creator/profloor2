@@ -2,5 +2,8 @@
   "functions": {
     "api/product-lookup.ts": { "maxDuration": 60 },
     "api/analyze-plan.ts": { "maxDuration": 60 }
-  }
+  },
+  "rewrites": [
+    { "source": "/adminsida", "destination": "/adminsida.html" }
+  ]
 }
