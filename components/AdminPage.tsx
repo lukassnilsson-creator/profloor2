@@ -62,6 +62,12 @@ const fmt = (iso: string | null) => {
   return d.toLocaleDateString('sv-SE', { year: 'numeric', month: 'short', day: 'numeric' });
 };
 
+const fmtDateTime = (iso: string | null) => {
+  if (!iso) return '–';
+  const d = new Date(iso);
+  return d.toLocaleString('sv-SE', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+};
+
 const StatCard = ({ label, value, sub }: { label: string; value: string | number; sub?: string }) => (
   <div className="bg-white rounded-xl border border-[#e5e5e5] px-5 py-4">
     <p className="text-[10px] font-medium text-[#9a9a9a] uppercase tracking-wide mb-1">{label}</p>
@@ -366,7 +372,7 @@ export default function AdminPage() {
                   <tr key={u.id} className={`border-b border-[#f5f5f5] ${i % 2 === 0 ? '' : 'bg-[#fafafa]'}`}>
                     <td className="px-4 py-2.5 text-[10px] font-medium text-[#1a1a1a]">{u.email}</td>
                     <td className="px-4 py-2.5 text-[10px] text-[#767676]">{fmt(u.createdAt)}</td>
-                    <td className="px-4 py-2.5 text-[10px] text-[#767676]">{fmt(u.lastActivity)}</td>
+                    <td className="px-4 py-2.5 text-[10px] text-[#767676]">{fmtDateTime(u.lastActivity)}</td>
                     <td className="px-4 py-2.5 text-[10px]">
                       <span className={`font-semibold ${u.loginCount > 0 ? 'text-[#1a1a1a]' : 'text-[#9a9a9a]'}`}>
                         {u.loginCount > 0 ? u.loginCount : '–'}

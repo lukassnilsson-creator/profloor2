@@ -402,12 +402,22 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       let deliveryEstimate = cached.delivery_estimate;
       let isCampaignPrice = cached.is_campaign_price;
 
+      let imageUrl = cached.image_url;
+
       const html = await fetchHtml(productUrl);
       if (html) {
         const { price, currency: cur, stock } = extractPriceFromHtml(html);
         if (price) pricePerPackage = price;
         if (cur) currency = cur;
         if (stock) stockStatus = stock;
+        // Backfill image if it was missing when originally cached
+        if (!imageUrl) {
+          const jsonLd = extractJsonLd(html);
+          imageUrl = resolveImage(html, jsonLd, productUrl);
+          if (imageUrl && sb) {
+            sb.from('product_cache').update({ image_url: imageUrl }).eq('url', productUrl).catch(() => {});
+          }
+        }
       } else {
         try {
           const fresh = await refreshPriceWithGeminiSearch(ai, productUrl);
@@ -431,7 +441,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         widthMm: cached.width_mm,
         thicknessMm: cached.thickness_mm ?? undefined,
         planksPerPackage: cached.planks_per_package,
-        imageUrl: cached.image_url ?? undefined,
+        imageUrl: imageUrl ?? undefined,
         pricePerPackage,
         currency,
         stockStatus: stockStatus ?? undefined,
