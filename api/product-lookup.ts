@@ -1,5 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
+import { createClient } from '@supabase/supabase-js';
 
 interface ApiRequest {
   method?: string;
@@ -35,8 +36,68 @@ interface JsonLdProduct {
   offers?: JsonLdOffer | JsonLdOffer[];
 }
 
+interface CacheRow {
+  url: string;
+  name: string;
+  length_mm: number;
+  width_mm: number;
+  thickness_mm: number | null;
+  planks_per_package: number;
+  image_url: string | null;
+  price_per_package: number;
+  currency: string;
+  stock_status: string | null;
+  delivery_estimate: string | null;
+  is_campaign_price: boolean;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object';
+
+// ─── Supabase cache ───────────────────────────────────────────────────────────
+
+const getSupabase = () => {
+  const url = process.env.VITE_SUPABASE_URL;
+  const key = process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { persistSession: false } });
+};
+
+const getCached = async (sb: ReturnType<typeof createClient>, url: string): Promise<CacheRow | null> => {
+  const { data, error } = await sb.from('product_cache').select('*').eq('url', url).maybeSingle();
+  if (error || !data) return null;
+  return data as CacheRow;
+};
+
+const saveCache = async (sb: ReturnType<typeof createClient>, url: string, d: Record<string, unknown>) => {
+  await sb.from('product_cache').upsert({
+    url,
+    name: d.productName,
+    length_mm: d.lengthMm,
+    width_mm: d.widthMm,
+    thickness_mm: d.thicknessMm ?? null,
+    planks_per_package: d.planksPerPackage,
+    image_url: d.imageUrl ?? null,
+    price_per_package: d.pricePerPackage,
+    currency: d.currency,
+    stock_status: d.stockStatus ?? null,
+    delivery_estimate: d.deliveryEstimate ?? null,
+    is_campaign_price: d.isCampaignPrice ?? false,
+  }, { onConflict: 'url' });
+};
+
+const updateCachePrice = async (sb: ReturnType<typeof createClient>, url: string, d: {
+  pricePerPackage: number; currency: string; stockStatus: string | null;
+  deliveryEstimate: string | null; isCampaignPrice: boolean;
+}) => {
+  await sb.from('product_cache').update({
+    price_per_package: d.pricePerPackage,
+    currency: d.currency,
+    stock_status: d.stockStatus,
+    delivery_estimate: d.deliveryEstimate,
+    is_campaign_price: d.isCampaignPrice,
+  }).eq('url', url);
+};
 
 // ─── HTML fetching ────────────────────────────────────────────────────────────
 
@@ -63,7 +124,6 @@ const fetchHtml = async (url: string): Promise<string | null> => {
     });
     if (!res.ok) return null;
     const text = await res.text();
-    // Detect Cloudflare/bot challenge pages — they have no useful product data
     if (
       text.includes('cf-browser-verification') ||
       text.includes('challenge-platform') ||
@@ -112,7 +172,6 @@ const decodeHtml = (str: string): string =>
 const parsePrice = (price: unknown): number | null => {
   if (typeof price === 'number') return Number.isFinite(price) ? price : null;
   if (typeof price !== 'string') return null;
-  // Handle Swedish decimal comma and thousands spaces
   const cleaned = price.replace(/\s/g, '').replace(',', '.');
   const n = Number(cleaned);
   return Number.isFinite(n) ? n : null;
@@ -126,9 +185,12 @@ const mapAvailability = (url: string): string => {
   return url;
 };
 
+// ─── Image extraction ─────────────────────────────────────────────────────────
+
 const toAbsolute = (src: string, baseUrl?: string): string | null => {
   const s = src.trim();
   if (s.startsWith('http')) return s;
+  if (s.startsWith('//')) return 'https:' + s; // protocol-relative URL
   if (baseUrl && s.startsWith('/')) {
     try { return new URL(s, baseUrl).href; } catch { /* skip */ }
   }
@@ -136,7 +198,6 @@ const toAbsolute = (src: string, baseUrl?: string): string | null => {
 };
 
 const extractOgImage = (html: string, baseUrl?: string): string | null => {
-  // meta tag patterns
   const metaPatterns = [
     /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
     /<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i,
@@ -152,51 +213,44 @@ const extractOgImage = (html: string, baseUrl?: string): string | null => {
       if (abs) return abs;
     }
   }
-
-  // itemprop="image" microdata
   const microdata = html.match(/itemprop=["']image["'][^>]+content=["']([^"']+)["']/i)
     ?? html.match(/content=["']([^"']+)["'][^>]+itemprop=["']image["']/i);
   if (microdata?.[1]) {
     const abs = toAbsolute(microdata[1], baseUrl);
     if (abs) return abs;
   }
+  return null;
+};
 
+const resolveImage = (html: string, jsonLd: JsonLdProduct | null, baseUrl: string): string | null => {
+  const og = extractOgImage(html, baseUrl);
+  if (og) return og;
+  const ld = jsonLd?.image ? (Array.isArray(jsonLd.image) ? jsonLd.image[0] : jsonLd.image) : null;
+  if (typeof ld === 'string' && ld) return toAbsolute(ld, baseUrl) ?? ld;
   return null;
 };
 
 // ─── Text extraction for Gemini ───────────────────────────────────────────────
 
 const extractRelevantText = (html: string): string => {
-  // Strip noisy sections
   let text = html
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<style[\s\S]*?<\/style>/gi, '')
     .replace(/<nav[\s\S]*?<\/nav>/gi, '')
     .replace(/<footer[\s\S]*?<\/footer>/gi, '')
     .replace(/<header[\s\S]*?<\/header>/gi, '');
-
-  // Strip tags, collapse whitespace
   text = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-
-  // Always include the page start (product name + price are typically near the top).
-  // Also include the area around the first mm mention (where specs live).
-  // On many e-commerce sites the price section is hundreds of chars before the spec table,
-  // so a pure mm-anchor window misses it.
   const pageStart = text.slice(0, 2500);
-
   const mmIdx = text.search(/\d+\s*mm/i);
   if (mmIdx > 2500) {
-    // Spec section is further down — append a window around it
     const specStart = Math.max(2500, mmIdx - 500);
     const specEnd = Math.min(text.length, mmIdx + 2000);
     return pageStart + ' ' + text.slice(specStart, specEnd);
   }
-
-  // mm is within the first 2500 chars — page start already covers it
   return text.slice(0, 5000);
 };
 
-// ─── Gemini: extract dimensions from text (fast — no googleSearch) ────────────
+// ─── Gemini: extract dimensions (fast, no googleSearch) ───────────────────────
 
 const extractDimensionsWithGemini = async (
   ai: GoogleGenAI,
@@ -241,7 +295,6 @@ const extractWithGeminiSearch = async (
   ai: GoogleGenAI,
   productUrl: string
 ): Promise<Record<string, unknown>> => {
-  // Note: googleSearch + responseSchema are incompatible — use plain text + manual JSON parse
   const response = await ai.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: `Search for this flooring product page and extract its technical specifications: ${productUrl}.
@@ -254,11 +307,46 @@ const extractWithGeminiSearch = async (
     },
   });
   if (!response.text) throw new Error('Empty Gemini response');
-
-  // Extract JSON from the response (model may wrap it in text)
   const jsonMatch = response.text.match(/\{[\s\S]*\}/);
   if (!jsonMatch) throw new Error('No JSON found in Gemini response');
   return JSON.parse(jsonMatch[0]);
+};
+
+// ─── Gemini: quick price/stock refresh (for cached products) ─────────────────
+
+const refreshPriceWithGeminiSearch = async (
+  ai: GoogleGenAI,
+  productUrl: string
+): Promise<Record<string, unknown>> => {
+  const response = await ai.models.generateContent({
+    model: 'gemini-2.5-flash',
+    contents: `Check the current price and availability for this product: ${productUrl}.
+    Return ONLY a JSON object (no markdown):
+    {"pricePerPackage":0,"currency":"SEK","stockStatus":"...","deliveryEstimate":"...","isCampaignPrice":false}
+    Swedish context. Price per package (förpackning), not per m².`,
+    config: { tools: [{ googleSearch: {} }] },
+  });
+  if (!response.text) throw new Error('Empty Gemini response');
+  const jsonMatch = response.text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) throw new Error('No JSON found');
+  return JSON.parse(jsonMatch[0]);
+};
+
+// ─── Price extraction from HTML ───────────────────────────────────────────────
+
+const extractPriceFromHtml = (html: string) => {
+  const jsonLd = extractJsonLd(html);
+  const offer = jsonLd?.offers
+    ? (Array.isArray(jsonLd.offers) ? jsonLd.offers[0] : jsonLd.offers)
+    : null;
+  const priceSpec = offer?.priceSpecification
+    ? (Array.isArray(offer.priceSpecification) ? offer.priceSpecification[0] : offer.priceSpecification)
+    : null;
+  const price = offer?.price != null ? parsePrice(offer.price) : priceSpec?.price != null ? parsePrice(priceSpec.price) : null;
+  const currency = typeof offer?.priceCurrency === 'string' ? offer.priceCurrency
+    : typeof priceSpec?.priceCurrency === 'string' ? priceSpec.priceCurrency : null;
+  const stock = typeof offer?.availability === 'string' ? mapAvailability(offer.availability) : null;
+  return { price, currency, stock };
 };
 
 // ─── Error helpers ────────────────────────────────────────────────────────────
@@ -299,28 +387,75 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     }
 
     const ai = new GoogleGenAI({ apiKey });
+    const sb = getSupabase();
 
-    // ── Fast path: fetch HTML → JSON-LD + Gemini for dimensions ──────────────
+    // ── Cache lookup ──────────────────────────────────────────────────────────
+    const cached = sb ? await getCached(sb, productUrl) : null;
+
+    if (cached) {
+      console.log('[product-lookup] cache hit:', productUrl);
+
+      // Refresh price/stock/delivery — try HTML first, Gemini Search as fallback
+      let pricePerPackage = cached.price_per_package;
+      let currency = cached.currency;
+      let stockStatus = cached.stock_status;
+      let deliveryEstimate = cached.delivery_estimate;
+      let isCampaignPrice = cached.is_campaign_price;
+
+      const html = await fetchHtml(productUrl);
+      if (html) {
+        const { price, currency: cur, stock } = extractPriceFromHtml(html);
+        if (price) pricePerPackage = price;
+        if (cur) currency = cur;
+        if (stock) stockStatus = stock;
+      } else {
+        try {
+          const fresh = await refreshPriceWithGeminiSearch(ai, productUrl);
+          if (typeof fresh.pricePerPackage === 'number' && fresh.pricePerPackage > 0) pricePerPackage = fresh.pricePerPackage;
+          if (typeof fresh.currency === 'string' && fresh.currency) currency = fresh.currency;
+          if (typeof fresh.stockStatus === 'string') stockStatus = fresh.stockStatus;
+          if (typeof fresh.deliveryEstimate === 'string') deliveryEstimate = fresh.deliveryEstimate;
+          if (typeof fresh.isCampaignPrice === 'boolean') isCampaignPrice = fresh.isCampaignPrice;
+        } catch { /* use cached price */ }
+      }
+
+      // Update price in cache (fire-and-forget)
+      if (sb) {
+        updateCachePrice(sb, productUrl, { pricePerPackage, currency, stockStatus, deliveryEstimate, isCampaignPrice })
+          .catch(() => { /* non-critical */ });
+      }
+
+      return res.status(200).json({
+        productName: cached.name,
+        lengthMm: cached.length_mm,
+        widthMm: cached.width_mm,
+        thicknessMm: cached.thickness_mm ?? undefined,
+        planksPerPackage: cached.planks_per_package,
+        imageUrl: cached.image_url ?? undefined,
+        pricePerPackage,
+        currency,
+        stockStatus: stockStatus ?? undefined,
+        deliveryEstimate: deliveryEstimate ?? undefined,
+        isCampaignPrice,
+      });
+    }
+
+    // ── Cache miss: full lookup ───────────────────────────────────────────────
+    console.log('[product-lookup] cache miss, full lookup:', productUrl);
+
+    // Fast path: fetch HTML → JSON-LD + Gemini for dimensions
     const html = await fetchHtml(productUrl);
 
     if (html) {
       const jsonLd = extractJsonLd(html);
-      const ogImage = extractOgImage(html, productUrl);
-      // Fall back to JSON-LD image field if og:image/twitter:image not found
-      const jsonLdImage = jsonLd?.image
-        ? (Array.isArray(jsonLd.image) ? jsonLd.image[0] : jsonLd.image)
-        : null;
-      const imageUrl = ogImage ?? (typeof jsonLdImage === 'string' && jsonLdImage ? jsonLdImage : null);
-      console.log('[product-lookup] image sources:', { url: productUrl, ogImage, jsonLdImage, imageUrl });
+      const imageUrl = resolveImage(html, jsonLd, productUrl);
+      console.log('[product-lookup] image sources:', { url: productUrl, imageUrl });
       const productText = extractRelevantText(html);
 
       const offer = jsonLd?.offers
         ? Array.isArray(jsonLd.offers) ? jsonLd.offers[0] : jsonLd.offers
         : null;
-
       const nameFromLd = typeof jsonLd?.name === 'string' ? decodeHtml(jsonLd.name) : null;
-
-      // Try offer.price, then fall back to offer.priceSpecification.price
       const priceSpec = offer?.priceSpecification
         ? Array.isArray(offer.priceSpecification) ? offer.priceSpecification[0] : offer.priceSpecification
         : null;
@@ -352,21 +487,18 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           imageUrl: imageUrl ?? undefined,
         };
 
-        // Quality gate: if key fields are missing the page was likely blocked/challenged.
-        // Fall through to the Gemini googleSearch path which doesn't hit the site directly.
         const hasPrice = typeof result.pricePerPackage === 'number' && result.pricePerPackage > 0;
         const hasDimensions = result.lengthMm > 0 && result.widthMm > 0;
-        if (!hasPrice || !hasDimensions) {
-          throw new Error('Fast path returned incomplete data');
-        }
+        if (!hasPrice || !hasDimensions) throw new Error('Fast path returned incomplete data');
 
+        if (sb) saveCache(sb, productUrl, result).catch(() => { /* non-critical */ });
         return res.status(200).json(result);
       } catch (fastErr) {
         console.error('Fast path failed, falling back to search:', fastErr);
       }
     }
 
-    // ── Slow path: full Gemini with googleSearch ──────────────────────────────
+    // Slow path: Gemini with googleSearch
     const retryDelaysMs = [0, 400, 900];
     for (let attempt = 0; attempt < retryDelaysMs.length; attempt++) {
       if (retryDelaysMs[attempt] > 0) {
@@ -377,9 +509,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         const data = await extractWithGeminiSearch(ai, productUrl);
 
         if (!data.imageUrl && html) {
-          data.imageUrl = extractOgImage(html, productUrl);
+          data.imageUrl = resolveImage(html, null, productUrl);
         }
 
+        if (sb) saveCache(sb, productUrl, data).catch(() => { /* non-critical */ });
         return res.status(200).json(data);
       } catch (error: unknown) {
         const { isUnavailableError } = getErrorInfo(error);
