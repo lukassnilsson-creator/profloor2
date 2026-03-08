@@ -40,6 +40,8 @@ const ALLOWED_HOSTS = [
   'www.bricmate.se', 'cdn.bricmate.se',
   // ellos / home
   'img.ellos.se', 'www.ellos.se',
+  // golvlageret
+  'golvlageret.se', 'www.golvlageret.se',
   // generic image CDNs used by many Swedish retailers
   'images.ctfassets.net', 'cdn.shopify.com', 'i.imgur.com',
 ];
