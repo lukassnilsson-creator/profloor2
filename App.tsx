@@ -122,12 +122,12 @@ const findOptimizedLayout = (
     ? points.map((p) => ({ x: p.y, y: -p.x }))
     : points;
 
-  let bestPlanksOpened = Infinity;
-  let best = {
-    startOffset: settings.startOffset,
-    startOffsetVertical: settings.startOffsetVertical,
-    minStagger: settings.minStagger,
-  };
+  // Prefer 0 offset (full plank start) as baseline — only a strictly better result wins
+  const midStagger = Math.round(staggerFloor + staggerRange / 2);
+  const zeroCandidate: PlankSettings = { ...settings, startOffset: 0, startOffsetVertical: 0, minStagger: midStagger };
+  const { totalPlanksOpened: zeroOpened } = calculateLayout(effectivePoints, zeroCandidate);
+  let bestPlanksOpened = zeroOpened;
+  let best = { startOffset: 0, startOffsetVertical: 0, minStagger: midStagger };
 
   for (let i = 0; i < constraints.iterations; i++) {
     const candidate: PlankSettings = {

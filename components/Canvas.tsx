@@ -899,40 +899,49 @@ const Canvas: React.FC<CanvasProps> = ({
           onClick={(event) => event.stopPropagation()}
         >
           {contextMenu.kind === 'edge' ? (
-            <button
-              onClick={() => {
-                const nextPoints = addOrInsertPoint(points, contextMenu.cursor, contextMenu.edgeIdx, snapToGrid, gridSize);
-                if (nextPoints) {
-                  onRequestHistorySnapshot();
-                  setPoints(nextPoints);
-                }
-                setContextMenu(null);
-              }}
-              className="pf-action-heading w-full px-4 py-2 text-left font-medium hover:bg-[#F6F2EF]"
-            >
-              Lägg till punkt
-            </button>
-          ) : contextMenu.kind === 'point' ? (
-            <>
+            <div className="px-1.5 py-0.5">
               <button
+                type="button"
                 onClick={() => {
-                  if (settings.originPointIdx !== contextMenu.pointIdx) {
+                  const nextPoints = addOrInsertPoint(points, contextMenu.cursor, contextMenu.edgeIdx, snapToGrid, gridSize);
+                  if (nextPoints) {
                     onRequestHistorySnapshot();
-                    setSettings({ ...settings, originPointIdx: contextMenu.pointIdx });
+                    setPoints(nextPoints);
                   }
                   setContextMenu(null);
                 }}
-                className="pf-action-heading w-full px-4 py-2 text-left font-medium hover:bg-[#F6F2EF]"
+                className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
               >
-                Välj som start
+                Lägg till punkt
               </button>
-              {points.length > 3 && (
+            </div>
+          ) : contextMenu.kind === 'point' ? (
+            <>
+              <div className="px-1.5 py-0.5">
                 <button
-                  onClick={() => handleDeletePoint(contextMenu.pointIdx)}
-                  className="pf-action-heading w-full px-4 py-2 text-left font-medium text-red-700 hover:bg-[#FFF4F4]"
+                  type="button"
+                  onClick={() => {
+                    if (settings.originPointIdx !== contextMenu.pointIdx) {
+                      onRequestHistorySnapshot();
+                      setSettings({ ...settings, originPointIdx: contextMenu.pointIdx });
+                    }
+                    setContextMenu(null);
+                  }}
+                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
                 >
-                  Ta bort hörn
+                  Välj som start
                 </button>
+              </div>
+              {points.length > 3 && (
+                <div className="px-1.5 py-0.5">
+                  <button
+                    type="button"
+                    onClick={() => handleDeletePoint(contextMenu.pointIdx)}
+                    className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#C41230] hover:bg-[#fff0f1] transition-colors"
+                  >
+                    Ta bort punkt
+                  </button>
+                </div>
               )}
             </>
           ) : (

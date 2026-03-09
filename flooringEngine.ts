@@ -9,10 +9,10 @@ export interface LayoutResult {
 }
 
 export const calculateLayout = (
-  roomPoints: Point[],
+  roomPointsInput: Point[],
   settings: PlankSettings
 ): LayoutResult => {
-  if (roomPoints.length < 3 || settings.width < 1 || settings.length < 1) {
+  if (roomPointsInput.length < 3 || settings.width < 1 || settings.length < 1) {
     return { planks: [], wastePieces: [], totalPlanksOpened: 0 };
   }
 
@@ -21,12 +21,29 @@ export const calculateLayout = (
   const MIN_LAST_ROW_WIDTH = 30; // mm
   const SHIFT_COMPENSATION = 65; // mm
 
+  // Determine laying direction from the selected origin corner.
+  // If origin is on the right half → mirror X (lay right-to-left).
+  // If origin is on the bottom half → mirror Y (lay bottom-to-top).
+  const { minX: minXIn, maxX: maxXIn, minY: minYIn, maxY: maxYIn } = getBoundingBox(roomPointsInput);
+  const originPointInput = roomPointsInput[settings.originPointIdx] || roomPointsInput[0];
+  const mirrorX = originPointInput.x > (minXIn + maxXIn) / 2;
+  const mirrorY = originPointInput.y > (minYIn + maxYIn) / 2;
+
+  // Transform room points into canonical space where the origin is always near the top-left.
+  // The algorithm always runs left-to-right, top-to-bottom in this canonical space.
+  const roomPoints: Point[] = (mirrorX || mirrorY)
+    ? roomPointsInput.map(p => ({
+        x: mirrorX ? -p.x : p.x,
+        y: mirrorY ? -p.y : p.y,
+      }))
+    : roomPointsInput;
+
   const { minY, maxY } = getBoundingBox(roomPoints);
-  
+
   // Boundary with gap
   const effectiveMinY = minY + GAP;
   const effectiveMaxY = maxY - GAP;
-  
+
   const originPoint = roomPoints[settings.originPointIdx] || roomPoints[0];
   const baseX = originPoint.x;
   const baseY = originPoint.y;
@@ -44,13 +61,13 @@ export const calculateLayout = (
   const performLayout = (vOffset: number): LayoutResult => {
     const planks: PlankInstance[] = [];
     const wastePieces: WastePiece[] = [];
-    
+
     // Calculate row alignment based on origin point and compensation shift
     const alignmentY = baseY - vOffset;
-    
+
     // Find the very first row top that could possibly intersect the room
     const firstRowTop = alignmentY - Math.ceil((alignmentY - effectiveMinY) / rowHeight) * rowHeight;
-    
+
     const rowTops: number[] = [];
     let currentY = firstRowTop;
     while (currentY < effectiveMaxY) {
@@ -66,17 +83,17 @@ export const calculateLayout = (
     // Check if the last row is too narrow
     const lastRowTop = rowTops[rowTops.length - 1];
     const lastRowVisibleHeight = effectiveMaxY - lastRowTop;
-    
+
     // If last row is a sliver and we haven't shifted yet, shift the entire floor up
     if (vOffset === 0 && lastRowVisibleHeight < MIN_LAST_ROW_WIDTH) {
       return performLayout(SHIFT_COMPENSATION);
     }
 
-    let carryOverOffcut = (settings.startOffset) % settings.length; 
-    let carryOverSourceId: string | undefined = undefined; 
+    let carryOverOffcut = (settings.startOffset) % settings.length;
+    let carryOverSourceId: string | undefined = undefined;
     let carryOverOffcutPlacement: { x: number; y: number; h: number } | null = null;
-    let lastRowJoints: number[] = []; 
-    let rowBeforeLastJoints: number[] = []; 
+    let lastRowJoints: number[] = [];
+    let rowBeforeLastJoints: number[] = [];
     let totalPlanksOpened = (settings.startOffset > 0) ? 1 : 0;
 
     rowTops.forEach((rowTop, rowIdx) => {
@@ -84,7 +101,7 @@ export const calculateLayout = (
       const actualRowTop = Math.max(rowTop, effectiveMinY);
       const actualRowBottom = Math.min(rowTop + rowHeight, effectiveMaxY);
       const actualRowHeight = actualRowBottom - actualRowTop;
-      
+
       if (actualRowHeight < 0.1) return;
 
       const segments = getWideRowSegments(actualRowTop, actualRowBottom, roomPoints);
@@ -121,12 +138,12 @@ export const calculateLayout = (
           const finalPiece = segEnd - currentJoint;
           if (finalPiece < settings.minEndPiece && finalPiece > 0.1) return false;
 
-          const hasClashPrev = testJoints.some(tj => 
+          const hasClashPrev = testJoints.some(tj =>
             lastRowJoints.some(lj => Math.abs(tj - lj) < settings.minStagger)
           );
           if (hasClashPrev) return false;
 
-          const hasClashTwoRowsBack = testJoints.some(tj => 
+          const hasClashTwoRowsBack = testJoints.some(tj =>
             rowBeforeLastJoints.some(lj => Math.abs(tj - lj) < (settings.minStagger / 2))
           );
           if (hasClashTwoRowsBack) return false;
@@ -163,7 +180,7 @@ export const calculateLayout = (
           }
         }
 
-        // 2. Try Origin alignment
+        // 2. Try full plank first, then origin alignment as fallback
         if (!foundStart) {
           if (carryOverOffcut > 0.5) {
             const discardPlacement = carryOverOffcutPlacement;
@@ -180,12 +197,12 @@ export const calculateLayout = (
           carryOverSourceId = undefined;
           carryOverOffcutPlacement = null;
           totalPlanksOpened++;
-          
-          if (originAlignmentOffset >= settings.minEndPiece && validateConfig(originAlignmentOffset)) {
-            startLength = originAlignmentOffset;
-            foundStart = true;
-          } else if (validateConfig(fullPlankLength)) {
+
+          if (validateConfig(fullPlankLength)) {
             startLength = fullPlankLength;
+            foundStart = true;
+          } else if (originAlignmentOffset >= settings.minEndPiece && validateConfig(originAlignmentOffset)) {
+            startLength = originAlignmentOffset;
             foundStart = true;
           } else {
             for (let testS = fullPlankLength; testS >= settings.minEndPiece; testS -= 5) {
@@ -210,12 +227,12 @@ export const calculateLayout = (
         let curX = segStart;
         let isFirstInSegment = true;
         let safetyPlanks = 0;
-        
+
         while (curX < segEnd - 0.1 && safetyPlanks < 1000) {
           safetyPlanks++;
           const pLen = isFirstInSegment ? Math.min(startLength, segEnd - curX) : Math.min(fullPlankLength, segEnd - curX);
           const plankId = `r${rowIdx}-s${segments.indexOf(segment)}-p${safetyPlanks}`;
-          
+
           if (!isFirstInSegment) totalPlanksOpened++;
 
           const isLastInSegment = (curX + pLen >= segEnd - 0.1);
@@ -264,5 +281,28 @@ export const calculateLayout = (
     return { planks, wastePieces, totalPlanksOpened };
   };
 
-  return performLayout(normalizedVerticalOffset);
+  const rawResult = performLayout(normalizedVerticalOffset);
+
+  // If no mirroring was applied, return directly
+  if (!mirrorX && !mirrorY) return rawResult;
+
+  // Transform plank and waste coordinates back to the original coordinate space
+  const mirrorPlank = (p: PlankInstance): PlankInstance => ({
+    ...p,
+    x: mirrorX ? -(p.x + p.w) : p.x,
+    y: mirrorY ? -(p.y + p.h) : p.y,
+    visualX: mirrorX ? -(p.visualX + p.w) : p.visualX,
+  });
+
+  const mirrorWaste = (w: WastePiece): WastePiece => ({
+    ...w,
+    x: mirrorX ? -(w.x + w.w) : w.x,
+    y: mirrorY ? -(w.y + w.h) : w.y,
+  });
+
+  return {
+    totalPlanksOpened: rawResult.totalPlanksOpened,
+    planks: rawResult.planks.map(mirrorPlank),
+    wastePieces: rawResult.wastePieces.map(mirrorWaste),
+  };
 };
