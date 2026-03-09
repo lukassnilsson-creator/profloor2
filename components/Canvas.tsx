@@ -139,7 +139,7 @@ const Canvas: React.FC<CanvasProps> = ({
   const [gridOpacity, setGridOpacity] = useState(0.4); // Admin: expose setGridOpacity via admin panel to let users adjust
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [toolPanelOffset, setToolPanelOffset] = useState(loadToolPanelOffset);
-  const [showGrid, setShowGrid] = useState(true);
+  const [showGrid, setShowGrid] = useState(false);
 
   // Kährs palette
   const factoryColor = { r: 210, g: 183, b: 172 };
@@ -962,7 +962,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   onClick={() => { setSettings({ ...settings, visualContrast: settings.visualContrast > 0 ? 0 : 0.3 }); setContextMenu(null); }}
                   className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
                 >
-                  {settings.visualContrast > 0 ? 'Dölj läggningskontrast' : 'Visa läggningskontrast'}
+                  {settings.visualContrast > 0 ? 'Läggningskontrast av' : 'Läggningskontrast på'}
                 </button>
               </div>
 
