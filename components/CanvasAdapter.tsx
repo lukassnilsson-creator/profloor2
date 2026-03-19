@@ -68,6 +68,7 @@ interface Props {
   isAuthed?: boolean;
   onRequestSignIn?: () => void;
   onAddToCart?: (areaMm2: number) => void;
+  onFirstEdit?: () => void;
   pricePerM2?: number;
 }
 
@@ -77,6 +78,7 @@ export default function CanvasAdapter({
   isAuthed = false,
   onRequestSignIn,
   onAddToCart,
+  onFirstEdit,
   pricePerM2 = 479,
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -113,10 +115,15 @@ export default function CanvasAdapter({
   const onToggleBackgroundDrawing = useCallback(() => setShowBackgroundDrawing((v) => !v), []);
   const onToggleEdgeLengths = useCallback(() => setShowEdgeLengths((v) => !v), []);
   const onToggleSnapToGrid = useCallback(() => setSnapToGrid((v) => !v), []);
+  const firstEditFired = useRef(false);
   const onRequestHistorySnapshot = useCallback(() => {
     setUndoStack(prev => [...prev.slice(-19), points.map(p => ({ ...p }))]);
     setRedoStack([]);
-  }, [points]);
+    if (!firstEditFired.current) {
+      firstEditFired.current = true;
+      onFirstEdit?.();
+    }
+  }, [points, onFirstEdit]);
 
   const handleUndo = useCallback(() => {
     setUndoStack(prev => {

@@ -46,6 +46,10 @@ interface Stats {
   totalBackgroundUploads: number;
   totalPlanCancellations: number;
   anonymousFloorSessions: number;
+  demoToolOpenedLoggedIn: number;
+  demoToolOpenedAnonymous: number;
+  demoFloorDesignedLoggedIn: number;
+  demoFloorDesignedAnonymous: number;
 }
 
 interface AdminData {
@@ -321,6 +325,36 @@ export default function AdminPage() {
                   ? `${Math.round((stats.totalPlanCancellations / stats.totalBackgroundUploads) * 100)}% avbrottsgrad`
                   : undefined
               }
+            />
+          </div>
+        </section>
+
+        {/* Demo mockup analytics */}
+        <section>
+          <h2 className="text-[11px] font-semibold text-[#9a9a9a] uppercase tracking-wide mb-3">Demo — Produktmockup</h2>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <StatCard
+              label="Öppnat ritverktyget"
+              value={stats.demoToolOpenedLoggedIn + stats.demoToolOpenedAnonymous}
+              sub={`${stats.demoToolOpenedLoggedIn} inloggade · ${stats.demoToolOpenedAnonymous} anonyma`}
+            />
+            <StatCard
+              label="Designat ett golv"
+              value={stats.demoFloorDesignedLoggedIn + stats.demoFloorDesignedAnonymous}
+              sub={`${stats.demoFloorDesignedLoggedIn} inloggade · ${stats.demoFloorDesignedAnonymous} anonyma`}
+            />
+            <StatCard
+              label="Konverteringsgrad"
+              value={
+                stats.demoToolOpenedLoggedIn + stats.demoToolOpenedAnonymous > 0
+                  ? `${Math.round(
+                      ((stats.demoFloorDesignedLoggedIn + stats.demoFloorDesignedAnonymous) /
+                        (stats.demoToolOpenedLoggedIn + stats.demoToolOpenedAnonymous)) *
+                        100
+                    )}%`
+                  : '–'
+              }
+              sub="öppnat → designat"
             />
           </div>
         </section>

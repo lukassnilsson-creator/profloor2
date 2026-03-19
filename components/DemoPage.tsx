@@ -1,5 +1,6 @@
-import React, { useEffect, useState, Suspense } from 'react';
+import React, { useEffect, useState, useRef, Suspense } from 'react';
 import { supabase } from '../lib/supabase';
+import { logEvent } from '../lib/analytics';
 import type { User } from '@supabase/supabase-js';
 const CanvasAdapter = React.lazy(() => import('./CanvasAdapter'));
 
@@ -15,6 +16,7 @@ export default function DemoPage() {
   const [qty, setQty] = useState(10);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [canvasEverOpened, setCanvasEverOpened] = useState(false);
+  const toolOpenedLogged = useRef(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -191,7 +193,14 @@ export default function DemoPage() {
                 <div className="flex justify-center mb-3">
                   <button
                     type="button"
-                    onClick={() => { setCanvasEverOpened(true); setCanvasOpen(v => !v); }}
+                    onClick={() => {
+                      setCanvasEverOpened(true);
+                      setCanvasOpen(v => !v);
+                      if (!toolOpenedLogged.current) {
+                        toolOpenedLogged.current = true;
+                        logEvent('demo_tool_opened', authUser?.id ?? null);
+                      }
+                    }}
                     className="flex items-center gap-2 px-5 py-2 rounded-full border border-[#d0d0d0] bg-white text-[12px] font-semibold text-[#1a1a1a] hover:bg-[#f5f5f5] hover:border-[#bbb] transition-colors shadow-sm"
                     aria-expanded={canvasOpen}
                   >
@@ -216,6 +225,7 @@ export default function DemoPage() {
                         containerHeight={520}
                         pricePerM2={479}
                         onAddToCart={(area) => setQty(Math.max(1, Math.ceil(area)))}
+                        onFirstEdit={() => logEvent('demo_floor_designed', authUser?.id ?? null)}
                       />
                     </div>
                   </Suspense>

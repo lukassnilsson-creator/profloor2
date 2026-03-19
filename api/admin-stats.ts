@@ -167,6 +167,15 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         .map((e) => e.session_id)
     ).size;
 
+    // ── Demo mockup analytics ─────────────────────────────────────────────────
+    const demoToolOpened = events.filter((e) => e.event_type === 'demo_tool_opened');
+    const demoFloorDesigned = events.filter((e) => e.event_type === 'demo_floor_designed');
+
+    const demoToolOpenedLoggedIn  = new Set(demoToolOpened.filter((e) => e.user_id).map((e) => e.user_id)).size;
+    const demoToolOpenedAnonymous = new Set(demoToolOpened.filter((e) => !e.user_id && e.session_id).map((e) => e.session_id)).size;
+    const demoFloorDesignedLoggedIn  = new Set(demoFloorDesigned.filter((e) => e.user_id).map((e) => e.user_id)).size;
+    const demoFloorDesignedAnonymous = new Set(demoFloorDesigned.filter((e) => !e.user_id && e.session_id).map((e) => e.session_id)).size;
+
     // ── Build user list ───────────────────────────────────────────────────────
     const users = authUsers
       .map((u) => {
@@ -260,6 +269,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         totalBackgroundUploads,
         totalPlanCancellations,
         anonymousFloorSessions,
+        demoToolOpenedLoggedIn,
+        demoToolOpenedAnonymous,
+        demoFloorDesignedLoggedIn,
+        demoFloorDesignedAnonymous,
       },
       topStores,
       recentShares,
