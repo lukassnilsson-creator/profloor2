@@ -95,6 +95,8 @@ export default function CanvasAdapter({
   const [backgroundOpacity, setBackgroundOpacity] = useState(0.15);
   const [shareCopied, setShareCopied] = useState(false);
   const [isJusteraOpen, setIsJusteraOpen] = useState(false);
+  const [undoStack, setUndoStack] = useState<Point[][]>([]);
+  const [redoStack, setRedoStack] = useState<Point[][]>([]);
 
   // Close Justera panel on outside click
   useEffect(() => {
@@ -111,7 +113,41 @@ export default function CanvasAdapter({
   const onToggleBackgroundDrawing = useCallback(() => setShowBackgroundDrawing((v) => !v), []);
   const onToggleEdgeLengths = useCallback(() => setShowEdgeLengths((v) => !v), []);
   const onToggleSnapToGrid = useCallback(() => setSnapToGrid((v) => !v), []);
-  const onRequestHistorySnapshot = useCallback(() => {}, []);
+  const onRequestHistorySnapshot = useCallback(() => {
+    setUndoStack(prev => [...prev.slice(-19), points.map(p => ({ ...p }))]);
+    setRedoStack([]);
+  }, [points]);
+
+  const handleUndo = useCallback(() => {
+    setUndoStack(prev => {
+      if (prev.length === 0) return prev;
+      const snapshot = prev[prev.length - 1];
+      setRedoStack(r => [...r.slice(-19), points.map(p => ({ ...p }))]);
+      setPoints(snapshot.map(p => ({ ...p })));
+      return prev.slice(0, -1);
+    });
+  }, [points]);
+
+  const handleRedo = useCallback(() => {
+    setRedoStack(prev => {
+      if (prev.length === 0) return prev;
+      const snapshot = prev[prev.length - 1];
+      setUndoStack(u => [...u.slice(-19), points.map(p => ({ ...p }))]);
+      setPoints(snapshot.map(p => ({ ...p })));
+      return prev.slice(0, -1);
+    });
+  }, [points]);
+
+  // Keyboard shortcuts Cmd/Ctrl+Z and Cmd/Ctrl+Shift+Z
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); handleUndo(); }
+      if ((e.key === 'z' && e.shiftKey) || e.key === 'y') { e.preventDefault(); handleRedo(); }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [handleUndo, handleRedo]);
   const onRemoveBackgroundDrawing = useCallback(() => setBackgroundDrawing(null), []);
   const onResetDesign = useCallback(() => setPoints(DEFAULT_POINTS.map((p) => ({ ...p }))), []);
 
@@ -343,8 +379,28 @@ export default function CanvasAdapter({
           </button>
         </div>
 
-        {/* ── Top-right: Importera / Dela / Spara ── */}
+        {/* ── Top-right: Ångra / Gör om / Importera / Dela / Spara ── */}
         <div className="absolute top-3 right-3 z-40 flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleUndo}
+            disabled={undoStack.length === 0}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[#DAD6D2] bg-white shadow-sm text-[#4a4a4a] hover:bg-[#f5f5f5] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            title="Ångra (Cmd+Z)"
+            aria-label="Ångra"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M9 7H5v4M5 11c1.5-3.2 4.6-5 8.2-5 5 0 8.8 3.9 8.8 8.8" /></svg>
+          </button>
+          <button
+            type="button"
+            onClick={handleRedo}
+            disabled={redoStack.length === 0}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[#DAD6D2] bg-white shadow-sm text-[#4a4a4a] hover:bg-[#f5f5f5] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            title="Gör om (Cmd+Shift+Z)"
+            aria-label="Gör om"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M15 7h4v4M19 11c-1.5-3.2-4.6-5-8.2-5C5.8 6 2 9.9 2 14.8" /></svg>
+          </button>
           <input
             ref={importInputRef}
             type="file"

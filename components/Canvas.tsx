@@ -812,7 +812,7 @@ const Canvas: React.FC<CanvasProps> = ({
             className="pointer-events-auto absolute -translate-x-1/2 -translate-y-1/2"
             style={{ left: labelPosition.left, top: labelPosition.top }}
           >
-            <div className="flex items-baseline gap-px">
+            <div className="flex items-baseline gap-[2px]">
               {disableEdgeEditing ? (
                 <span
                   className="h-6 w-10 pr-0 text-right text-[10px] font-semibold text-[#1A1A1A] leading-6 select-none"
