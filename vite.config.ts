@@ -7,6 +7,7 @@ export default defineConfig({
       input: {
         main: './index.html',
         adminsida: './adminsida.html',
+        demo: './demo.html',
       },
     },
   },

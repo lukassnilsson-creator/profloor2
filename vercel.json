@@ -4,6 +4,7 @@
     "api/analyze-plan.ts": { "maxDuration": 60 }
   },
   "rewrites": [
-    { "source": "/adminsida", "destination": "/adminsida.html" }
+    { "source": "/adminsida", "destination": "/adminsida.html" },
+    { "source": "/demo", "destination": "/demo.html" }
   ]
 }
