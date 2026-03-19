@@ -15,19 +15,17 @@ const INITIAL_SETTINGS: PlankSettings = {
   startOffset: 0,
   startOffsetVertical: 0,
   planksPerPackage: 6,
-  visualContrast: 0.6,
+  visualContrast: 0,
   originPointIdx: 0,
   layoutRotated: false
 };
 
-// Default L-shaped room
+// Same default room as standalone app
 const DEFAULT_POINTS: Point[] = [
-  { x: -2500, y: -2000 },
-  { x: 2500,  y: -2000 },
-  { x: 2500,  y:  0    },
-  { x: 800,   y:  0    },
-  { x: 800,   y:  2000 },
-  { x: -2500, y:  2000 },
+  { x: -2000, y: -1500 },
+  { x:  2000, y: -1500 },
+  { x:  2000, y:  1500 },
+  { x: -2000, y:  1500 },
 ];
 
 // Inline optimizer (mirrors App.tsx findOptimizedLayout)
@@ -90,7 +88,7 @@ export default function CanvasAdapter({
   const [scale, setScale] = useState(0.09);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [showEdgeLengths, setShowEdgeLengths] = useState(true);
-  const [gridSize] = useState(50);
+  const [gridSize] = useState(100);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [backgroundDrawing, setBackgroundDrawing] = useState<any>(null);
   const [showBackgroundDrawing, setShowBackgroundDrawing] = useState(false);
@@ -419,6 +417,7 @@ export default function CanvasAdapter({
           onZoomExtents={handleZoomExtents}
           onResetDesign={onResetDesign}
           showFloatingToolPanel={false}
+          disableEdgeEditing={true}
           stats={stats}
           productInfo={productInfo ?? null}
         />

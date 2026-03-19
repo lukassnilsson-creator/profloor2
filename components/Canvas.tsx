@@ -30,6 +30,7 @@ interface CanvasProps {
   onZoomExtents: () => void;
   onResetDesign?: () => void;
   showFloatingToolPanel?: boolean;
+  disableEdgeEditing?: boolean;
   stats: Stats;
   productInfo: ProductInfo | null;
 }
@@ -118,6 +119,7 @@ const Canvas: React.FC<CanvasProps> = ({
   onZoomExtents,
   onResetDesign,
   showFloatingToolPanel = true,
+  disableEdgeEditing = false,
   stats,
   productInfo
 }) => {
@@ -811,19 +813,26 @@ const Canvas: React.FC<CanvasProps> = ({
             style={{ left: labelPosition.left, top: labelPosition.top }}
           >
             <div className="flex items-baseline gap-px">
-              <input
-                type="number"
-                value={Math.round(edgeLengths[index])}
-                onChange={(event) => {
-                  const value = parseFloat(event.target.value);
-                  if (value > 0) {
-                    onRequestHistorySnapshot();
-                    setPoints(movePointByLength(points, index, value));
-                  }
-                }}
-                className="h-6 w-10 border-none bg-transparent pr-0 text-right text-[10px] font-semibold text-[#1A1A1A] outline-none focus:bg-white/80 focus:rounded-sm focus:outline focus:outline-1 focus:outline-[#B69181] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
-                style={{ textShadow: '0 0 4px rgba(255,255,255,0.95), 0 0 8px rgba(255,255,255,0.7)' }}
-              />
+              {disableEdgeEditing ? (
+                <span
+                  className="h-6 w-10 pr-0 text-right text-[10px] font-semibold text-[#1A1A1A] leading-6 select-none"
+                  style={{ textShadow: '0 0 4px rgba(255,255,255,0.95), 0 0 8px rgba(255,255,255,0.7)' }}
+                >{Math.round(edgeLengths[index])}</span>
+              ) : (
+                <input
+                  type="number"
+                  value={Math.round(edgeLengths[index])}
+                  onChange={(event) => {
+                    const value = parseFloat(event.target.value);
+                    if (value > 0) {
+                      onRequestHistorySnapshot();
+                      setPoints(movePointByLength(points, index, value));
+                    }
+                  }}
+                  className="h-6 w-10 border-none bg-transparent pr-0 text-right text-[10px] font-semibold text-[#1A1A1A] outline-none focus:bg-white/80 focus:rounded-sm focus:outline focus:outline-1 focus:outline-[#B69181] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                  style={{ textShadow: '0 0 4px rgba(255,255,255,0.95), 0 0 8px rgba(255,255,255,0.7)' }}
+                />
+              )}
               <span className="select-none text-[9px] font-medium text-[#1A1A1A]" style={{ textShadow: '0 0 4px rgba(255,255,255,0.95), 0 0 8px rgba(255,255,255,0.7)' }}>mm</span>
             </div>
           </div>

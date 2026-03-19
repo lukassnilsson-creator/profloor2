@@ -14,6 +14,7 @@ export default function DemoPage() {
   const [signingIn, setSigningIn] = useState(false);
   const [qty, setQty] = useState(10);
   const [canvasOpen, setCanvasOpen] = useState(false);
+  const [canvasEverOpened, setCanvasEverOpened] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -190,7 +191,7 @@ export default function DemoPage() {
                 <div className="flex justify-center mb-3">
                   <button
                     type="button"
-                    onClick={() => setCanvasOpen(v => !v)}
+                    onClick={() => { setCanvasEverOpened(true); setCanvasOpen(v => !v); }}
                     className="flex items-center gap-2 px-5 py-2 rounded-full border border-[#d0d0d0] bg-white text-[12px] font-semibold text-[#1a1a1a] hover:bg-[#f5f5f5] hover:border-[#bbb] transition-colors shadow-sm"
                     aria-expanded={canvasOpen}
                   >
@@ -204,17 +205,19 @@ export default function DemoPage() {
                     </svg>
                   </button>
                 </div>
-                {canvasOpen && (
+                {canvasEverOpened && (
                   <Suspense fallback={
                     <div className="h-[520px] bg-[#FCFBFA] rounded-xl border border-[#EAE6E3] flex items-center justify-center text-[#bbb] text-[12px]">Laddar ritverktyg…</div>
                   }>
-                    <CanvasAdapter
-                      isAuthed={!!(authUser || isPreview)}
-                      onRequestSignIn={handleSignIn}
-                      containerHeight={520}
-                      pricePerM2={479}
-                      onAddToCart={(area) => setQty(Math.max(1, Math.ceil(area)))}
-                    />
+                    <div style={{ display: canvasOpen ? 'block' : 'none' }}>
+                      <CanvasAdapter
+                        isAuthed={!!(authUser || isPreview)}
+                        onRequestSignIn={handleSignIn}
+                        containerHeight={520}
+                        pricePerM2={479}
+                        onAddToCart={(area) => setQty(Math.max(1, Math.ceil(area)))}
+                      />
+                    </div>
                   </Suspense>
                 )}
               </div>
