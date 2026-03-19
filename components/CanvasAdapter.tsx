@@ -209,13 +209,25 @@ export default function CanvasAdapter({
     };
   }, [layout, points, settings.planksPerPackage, settings.length, settings.width]);
 
-  const wastePlanksCount = useMemo(() => {
+  // Whole planks left over after buying complete packages
+  // e.g. 33 planks needed → 6 packages × 6 = 36 bought → 3 whole boards left
+  const leftoverPlanks = useMemo(() => {
+    const plankCount = layout.totalPlanksOpened;
+    const packageCount = Math.ceil(plankCount / settings.planksPerPackage);
+    return packageCount * settings.planksPerPackage - plankCount;
+  }, [layout.totalPlanksOpened, settings.planksPerPackage]);
+
+  // Total spill % = (all bought material - room area) / all bought material
+  // Includes both cutting waste AND leftover whole planks from full-package purchase
+  const spillTotPercent = useMemo(() => {
     const plankAreaMM2 = settings.length * settings.width;
-    const areaMM2 = getPolygonArea(points);
-    const totalMaterialMM2 = layout.totalPlanksOpened * plankAreaMM2;
-    const wasteAreaMM2 = Math.max(0, totalMaterialMM2 - areaMM2);
-    return parseFloat((wasteAreaMM2 / plankAreaMM2).toFixed(1));
-  }, [layout.totalPlanksOpened, points, settings.length, settings.width]);
+    const roomAreaMM2 = getPolygonArea(points);
+    const plankCount = layout.totalPlanksOpened;
+    const packageCount = Math.ceil(plankCount / settings.planksPerPackage);
+    const totalBoughtMM2 = packageCount * settings.planksPerPackage * plankAreaMM2;
+    if (totalBoughtMM2 === 0) return 0;
+    return parseFloat(((totalBoughtMM2 - roomAreaMM2) / totalBoughtMM2 * 100).toFixed(1));
+  }, [layout.totalPlanksOpened, points, settings.planksPerPackage, settings.length, settings.width]);
 
   const totalPrice = Math.round(stats.area * pricePerM2);
 
@@ -430,20 +442,20 @@ export default function CanvasAdapter({
         <Divider />
         <StatCell label="Förp." value={`${stats.packageCount} st`} />
         <Divider />
-        <StatCell label="Åtgång" value={`${stats.plankCount} st`} />
+        <StatCell label="Åtgång br." value={`${stats.plankCount} st`} />
         <Divider />
-        <StatCell label="Spill antal" value={`${wastePlanksCount} st`} />
+        <StatCell label="Överskott br." value={`${leftoverPlanks} st`} />
         <Divider />
         <StatCell
-          label="Spill"
-          value={`${stats.wastePercent}%`}
-          valueClass={stats.wastePercent <= 15 ? 'text-[#3D8B37]' : 'text-[#c8001a]'}
+          label="Spill tot"
+          value={`${spillTotPercent}%`}
+          valueClass={spillTotPercent <= 15 ? 'text-[#3D8B37]' : 'text-[#c8001a]'}
         />
         <Divider />
 
-        {/* Sum tot — label + price inline */}
+        {/* Summa — label + price inline */}
         <div className="flex items-baseline gap-2 px-4 flex-shrink-0">
-          <span className="text-[10px] text-[#aaa] whitespace-nowrap">Sum tot</span>
+          <span className="text-[10px] text-[#aaa] whitespace-nowrap">Summa</span>
           <span className="text-[15px] font-black text-[#c8001a] whitespace-nowrap leading-none">
             {totalPrice.toLocaleString('sv-SE')} kr
           </span>
