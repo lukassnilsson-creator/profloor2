@@ -2,6 +2,7 @@
 import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import Sidebar from './components/Sidebar';
 import Canvas from './components/Canvas';
+import MobileProductPanel from './components/MobileProductPanel';
 import ImportWizard from './components/ImportWizard';
 import {
   Point,
@@ -536,6 +537,9 @@ const App: React.FC = () => {
   const importInputRef = useRef<HTMLInputElement>(null);
   const anonymousFloorLoggedRef = useRef(false);
   const [isManualActive, setIsManualActive] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
+  const [isMobileJusteraOpen, setIsMobileJusteraOpen] = useState(false);
+  const mobileJusteraRef = useRef<HTMLDivElement | null>(null);
   const [manualFloorSettings, setManualFloorSettings] = useState({
     length: INITIAL_SETTINGS.length,
     width: INITIAL_SETTINGS.width,
@@ -768,6 +772,27 @@ const App: React.FC = () => {
     });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [designState.activeDesignId]);
+
+  // Close mobile Justera panel on outside tap/click
+  useEffect(() => {
+    if (!isMobileJusteraOpen) return;
+    const handle = (e: MouseEvent | TouchEvent) => {
+      if (mobileJusteraRef.current && !mobileJusteraRef.current.contains(e.target as Node)) {
+        setIsMobileJusteraOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', handle);
+    return () => document.removeEventListener('pointerdown', handle);
+  }, [isMobileJusteraOpen]);
+
+  // Track viewport width for responsive sidebar behaviour
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
 
   const updateDesignById = (designId: string, updater: (design: FloorDesign) => FloorDesign) => {
@@ -1365,6 +1390,14 @@ const App: React.FC = () => {
     };
   }, [points, totalPlanksOpened, settings, productInfo]);
 
+  // Mobile canvas overlay: Justera slider limits
+  const mobileMaxOffset = Math.max(0, settings.length - settings.minEndPiece);
+  const mobileMaxVerticalOffset = Math.max(0, settings.width);
+  const mobileMaxMinPiece = Math.max(0, settings.length / 2);
+  const mobileLeftoverPlanks = Math.max(0, stats.packageCount * settings.planksPerPackage - stats.plankCount);
+  const mobileSpillPercent = stats.wastePercent.toFixed(1);
+  const mobileTotalPrice = stats.totalPrice != null ? Math.round(stats.totalPrice).toLocaleString('sv-SE') : null;
+
   const productStatsById = useMemo(() => {
     const statsMap: Record<string, Stats> = {};
 
@@ -1834,25 +1867,37 @@ const App: React.FC = () => {
   };
 
 
-  const contentColumns = 'grid-cols-[var(--pf-sidebar-w)_minmax(0,1fr)_0px]';
-  const topbarColumns = 'grid-cols-[var(--pf-topbar-sidebar-w)_minmax(0,1fr)_0px]';
+  const contentColumns = isMobile
+    ? 'grid-cols-[minmax(0,1fr)]'
+    : 'grid-cols-[var(--pf-sidebar-w)_minmax(0,1fr)_0px]';
+  const topbarColumns = isMobile
+    ? 'grid-cols-[52px_minmax(0,1fr)]'
+    : 'grid-cols-[var(--pf-topbar-sidebar-w)_minmax(0,1fr)_0px]';
 
   return (
-    <div className="h-screen w-full overflow-hidden bg-[#f5f5f5]">
+    <div className="w-full overflow-hidden bg-[#f5f5f5]" style={{ height: '100dvh' }}>
       <div className={`pf-app-shell relative grid h-full min-h-0 w-full ${contentColumns} grid-rows-[auto_minmax(0,1fr)] border border-[#d9d9d9] bg-white text-[#4a4a4a]`}>
         <div className="col-[1/-1] row-[1] z-20 bg-white border-b border-[#d9d9d9]">
-          <div className={`grid h-[102px] min-w-0 ${topbarColumns} sm:h-[114px]`}>
-            <div className="flex flex-col bg-white px-5 pt-5 pb-2 sm:px-6 sm:pt-6">
-              <div className="flex items-center gap-2.5">
-                <div className="flex h-8 w-8 items-center justify-center bg-[#C41230] text-white font-bold text-[14px] shrink-0">PF</div>
-                <h1 className="text-[20px] font-semibold leading-none tracking-[-0.01em] text-[#1a1a1a]">ProFloor CAD</h1>
-              </div>
-              <div className="flex-1" />
+          <div className={`grid min-w-0 ${topbarColumns} ${isMobile ? 'h-[90px]' : 'h-[102px] sm:h-[114px]'}`}>
+            <div className={`flex flex-col bg-white ${isMobile ? 'items-center justify-center' : 'px-5 pt-5 pb-2 sm:px-6 sm:pt-6'}`}>
+              {isMobile ? (
+                <div className="flex h-9 w-9 items-center justify-center">
+                  <div className="flex h-7 w-7 items-center justify-center bg-[#C41230] text-white font-bold text-[12px] shrink-0">PF</div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-8 w-8 items-center justify-center bg-[#C41230] text-white font-bold text-[14px] shrink-0">PF</div>
+                    <h1 className="text-[20px] font-semibold leading-none tracking-[-0.01em] text-[#1a1a1a]">ProFloor CAD</h1>
+                  </div>
+                  <div className="flex-1" />
+                </>
+              )}
             </div>
 
             <div className="flex min-w-0 flex-col">
-              {/* Login button — top right of topbar */}
-              <div className="flex items-center justify-end pr-3 sm:pr-6 pt-4 sm:pt-5 shrink-0">
+              {/* Login button — top right of topbar (+ title on mobile) */}
+              <div className="flex items-center justify-end pr-3 sm:pr-6 pt-3 sm:pt-5 shrink-0">
                 {user ? (
                   <div className="flex items-center gap-2">
                     {user.user_metadata?.avatar_url && (
@@ -2033,28 +2078,31 @@ const App: React.FC = () => {
         </div>
 
         <div className={`col-[1/-1] row-[2] grid min-h-0 min-w-0 ${contentColumns}`}>
-          <div className="col-[1] min-h-0 min-w-0 border-r border-[#d9d9d9] bg-white">
-            <Sidebar
-              settings={settings}
-              setSettings={handleSidebarSettingsChange}
-              products={activeDesign.products}
-              activeDesignName={activeDesign.name}
-              activeDesignId={activeDesign.id}
-              activeProductId={activeProductId}
-              productStatsById={productStatsById}
-              isManualActive={effectiveIsManualActive}
-              manualFloorSettings={manualFloorSettings}
-              manualStats={manualStats}
-              onActivateManual={activateManual}
-              onManualFloorSettingsChange={handleManualSettingsChange}
-              onAddProduct={addProduct}
-              onRemoveProduct={removeProduct}
-              onSelectProduct={activateProduct}
-              onOptimize={handleOptimizeLayout}
-            />
-          </div>
+          {/* Sidebar — only on desktop */}
+          {!isMobile && (
+            <div className="col-[1] min-h-0 min-w-0 border-r border-[#d9d9d9] bg-white">
+              <Sidebar
+                settings={settings}
+                setSettings={handleSidebarSettingsChange}
+                products={activeDesign.products}
+                activeDesignName={activeDesign.name}
+                activeDesignId={activeDesign.id}
+                activeProductId={activeProductId}
+                productStatsById={productStatsById}
+                isManualActive={effectiveIsManualActive}
+                manualFloorSettings={manualFloorSettings}
+                manualStats={manualStats}
+                onActivateManual={activateManual}
+                onManualFloorSettingsChange={handleManualSettingsChange}
+                onAddProduct={addProduct}
+                onRemoveProduct={removeProduct}
+                onSelectProduct={activateProduct}
+                onOptimize={handleOptimizeLayout}
+              />
+            </div>
+          )}
 
-          <main className="relative col-[2] min-h-0 min-w-0 overflow-hidden bg-[#f5f5f5]">
+          <main className={`relative ${isMobile ? 'col-[1] flex flex-col overflow-y-auto' : 'col-[2] overflow-hidden'} min-h-0 min-w-0 bg-[#f5f5f5]`}>
             {/* Sparade golv panel */}
             {showSavedFloors && (
               <div className="absolute inset-0 z-40 overflow-auto bg-white">
@@ -2244,9 +2292,9 @@ const App: React.FC = () => {
               );
             })()}
 
-            <div className="relative h-full min-h-0 min-w-0">
+            <div className={`relative ${isMobile ? 'h-[310px] flex-none' : 'h-full'} min-h-0 min-w-0`}>
               {/* Right side: vertical zoom controls, centered */}
-              <div className="absolute right-3 z-30 flex flex-col items-center gap-1.5" style={{ top: 'calc(50% - 60px)', transform: 'translateY(-50%)' }}>
+              <div className="absolute right-3 z-30 flex flex-col items-center gap-1.5" style={isMobile ? { top: 'calc(44px + (310px - 44px) / 2 - 20px)', transform: 'translateY(-50%)' } : { top: 'calc(50% - 60px)', transform: 'translateY(-50%)' }}>
                 <button
                   type="button"
                   onClick={() => handleZoomStep(1)}
@@ -2278,8 +2326,126 @@ const App: React.FC = () => {
                 </button>
               </div>
 
-              {/* Right: import, save, undo/redo */}
-              <div className="absolute right-3 top-3 z-30 flex items-center gap-2">
+              {/* Mobile: top-left overlay — Optimera, Justera, Rotera */}
+              {isMobile && (
+                <div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between gap-1.5 pointer-events-none">
+                  <div className="flex items-center gap-1.5 pointer-events-auto">
+                    {/* Optimera */}
+                    <button
+                      type="button"
+                      onClick={handleOptimizeLayout}
+                      className="h-8 px-3 rounded-full bg-white border border-[#d9d9d9] shadow-sm flex items-center gap-1.5 text-[11px] font-medium hover:bg-[#f0f0f0] transition-colors"
+                      title="Optimera läggning för minst spill"
+                    >
+                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
+                        <path d="M18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
+                      </svg>
+                      Optimera
+                    </button>
+                    {/* Justera */}
+                    <div ref={mobileJusteraRef} className="relative">
+                      <button
+                        type="button"
+                        onClick={() => setIsMobileJusteraOpen(v => !v)}
+                        className="h-8 px-3 rounded-full bg-white border border-[#d9d9d9] shadow-sm flex items-center gap-1.5 text-[11px] font-medium hover:bg-[#f0f0f0] transition-colors"
+                        aria-expanded={isMobileJusteraOpen}
+                        aria-haspopup="true"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      </button>
+                      {isMobileJusteraOpen && (
+                        <div className="absolute left-0 top-full mt-2 w-[210px] bg-white rounded-2xl border border-[#aaaaaa] shadow-[0_4px_20px_rgba(0,0,0,0.12)] px-4 py-4 space-y-3 z-50">
+                          <div className="text-[10px] font-semibold text-[#777] uppercase tracking-wider mb-1">Justera läggning</div>
+                          <div>
+                            <div className="mb-0.5 flex items-center justify-between">
+                              <label className="text-[9px] font-medium text-[#767676]">Skarvförskjutning</label>
+                              <span className="text-[10px] font-semibold text-[#333]">{Math.round(settings.minStagger)} mm</span>
+                            </div>
+                            <input type="range" min="0" max={Math.max(0, settings.length)} step="10"
+                              value={settings.minStagger}
+                              onChange={e => setActiveSettings({ ...settings, minStagger: Math.max(0, parseInt(e.target.value) || 0) })}
+                              className="kahrs-slider w-full" />
+                          </div>
+                          <div>
+                            <div className="mb-0.5 flex items-center justify-between">
+                              <label className="text-[9px] font-medium text-[#767676]">Startförskjutning hor.</label>
+                              <span className="text-[10px] font-semibold text-[#333]">{Math.round(settings.startOffset)} mm</span>
+                            </div>
+                            <input type="range" min="0" max={mobileMaxOffset} step="10"
+                              value={settings.startOffset}
+                              onChange={e => setActiveSettings({ ...settings, startOffset: Math.min(parseInt(e.target.value) || 0, mobileMaxOffset) })}
+                              className="kahrs-slider w-full" />
+                          </div>
+                          <div>
+                            <div className="mb-0.5 flex items-center justify-between">
+                              <label className="text-[9px] font-medium text-[#767676]">Startförskjutning vert.</label>
+                              <span className="text-[10px] font-semibold text-[#333]">{Math.round(settings.startOffsetVertical)} mm</span>
+                            </div>
+                            <input type="range" min="0" max={mobileMaxVerticalOffset} step="10"
+                              value={settings.startOffsetVertical}
+                              onChange={e => setActiveSettings({ ...settings, startOffsetVertical: Math.min(parseInt(e.target.value) || 0, mobileMaxVerticalOffset) })}
+                              className="kahrs-slider w-full" />
+                          </div>
+                          <div>
+                            <div className="mb-0.5 flex items-center justify-between">
+                              <label className="text-[9px] font-medium text-[#767676]">Minsta ändbit</label>
+                              <span className="text-[10px] font-semibold text-[#333]">{Math.round(settings.minEndPiece)} mm</span>
+                            </div>
+                            <input type="range" min="0" max={mobileMaxMinPiece} step="10"
+                              value={settings.minEndPiece}
+                              onChange={e => setActiveSettings({ ...settings, minEndPiece: Math.min(parseInt(e.target.value) || 0, mobileMaxMinPiece) })}
+                              className="kahrs-slider w-full" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    {/* Rotera */}
+                    <button
+                      type="button"
+                      onClick={() => setActiveSettings({ ...settings, layoutRotated: !settings.layoutRotated })}
+                      className="h-8 w-8 rounded-full bg-white border border-[#d9d9d9] shadow-sm flex items-center justify-center hover:bg-[#f0f0f0] transition-colors"
+                      aria-label="Rotera layout 90°"
+                      title={settings.layoutRotated ? 'Rotera 90° tillbaka' : 'Rotera 90°'}
+                    >
+                      <svg width="19" height="18" viewBox="0 0 26 24" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                        <rect x="1" y="1" width="5" height="14" rx="1" stroke={settings.layoutRotated ? '#333333' : '#CCCCCC'} />
+                        <rect x="8" y="13" width="14" height="5" rx="1" stroke={settings.layoutRotated ? '#CCCCCC' : '#333333'} />
+                        <path d="M7 4 C14 2, 18 5, 18 11.5" stroke="#CCCCCC" />
+                        <polyline points="15.5,10 18,11.5 16.5,14" stroke="#CCCCCC" />
+                      </svg>
+                    </button>
+                  </div>
+                  {/* Upload + Dela + Spara on mobile top-right */}
+                  <div className="flex items-center gap-1.5 pointer-events-auto">
+                    <button type="button" onClick={() => importInputRef.current?.click()}
+                      className="pf-action-heading flex h-8 items-center justify-center gap-1.5 rounded-full border border-[#d9d9d9] bg-white px-3 font-medium text-[#4a4a4a] shadow-sm hover:bg-[#f0f0f0] transition-colors"
+                      aria-label="Ladda ritning" title="Ladda ritning">
+                      <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 4v10m0 0l-4-4m4 4l4-4M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1" /></svg>
+                      <span className="whitespace-nowrap">Ladda ritning</span>
+                    </button>
+                    <button type="button" onClick={handleShare}
+                      className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] shadow-sm hover:bg-[#f0f0f0] transition-colors"
+                      aria-label="Dela" title="Dela">
+                      {shareCopied
+                        ? <svg className="h-3.5 w-3.5 text-[#3D8B37]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M5 13l4 4L19 7" /></svg>
+                        : <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
+                      }
+                    </button>
+                    <button type="button" onClick={handleSave} disabled={!user || isSaving}
+                      className={`flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition-colors ${user && !isSaving ? saveDone ? 'border-[#b8ddb5] bg-[#f0fbef] text-[#3D8B37]' : 'border-[#d9d9d9] bg-white text-[#4a4a4a] hover:bg-[#f0f0f0]' : 'border-[#e8e8e8] bg-white text-[#c0c0c0] opacity-50 cursor-not-allowed'}`}
+                      aria-label="Spara" title={user ? 'Spara' : 'Logga in för att spara'}>
+                      {saveDone
+                        ? <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M5 13l4 4L19 7" /></svg>
+                        : <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="17 21 17 13 7 13 7 21" /><polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="7 3 7 8 15 8" /></svg>
+                      }
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Right: import, save — desktop only */}
+              <div className={`absolute right-3 top-3 z-30 flex items-center gap-2 ${isMobile ? 'hidden' : ''}`}>
                 <input
                   ref={importInputRef}
                   type="file"
@@ -2290,26 +2456,6 @@ const App: React.FC = () => {
                     event.currentTarget.value = '';
                   }}
                 />
-                <button
-                  type="button"
-                  onClick={handleUndo}
-                  disabled={!canUndo}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
-                  title="Ångra (Cmd/Ctrl+Z)"
-                  aria-label="Ångra"
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M9 7H5v4M5 11c1.5-3.2 4.6-5 8.2-5 5 0 8.8 3.9 8.8 8.8" /></svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleRedo}
-                  disabled={!canRedo}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
-                  title="Gör om (Cmd/Ctrl+Shift+Z)"
-                  aria-label="Gör om"
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M15 7h4v4M19 11c-1.5-3.2-4.6-5-8.2-5C5.8 6 2 9.9 2 14.8" /></svg>
-                </button>
                 <button
                   type="button"
                   onClick={() => importInputRef.current?.click()}
@@ -2341,13 +2487,13 @@ const App: React.FC = () => {
                       ? 'border-[#C41230] bg-[#fff5f6]'
                       : 'border-[#d9d9d9] bg-white'
                   }`}
-                  aria-label="Importera ritning"
-                  title="Importera ritning"
+                  aria-label="Ladda ritning"
+                  title="Ladda ritning"
                 >
                   <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 4v10m0 0l-4-4m4 4l4-4M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1" />
                   </svg>
-                  <span className="whitespace-nowrap">Importera ritning</span>
+                  <span className="whitespace-nowrap">Ladda ritning</span>
                 </button>
                 <button
                   type="button"
@@ -2436,10 +2582,93 @@ const App: React.FC = () => {
                 productInfo={productInfo}
               />
 
+              {/* Bottom center: Ångra / Gör om */}
+              <div className="absolute bottom-3 left-1/2 z-30 flex items-center gap-1.5" style={{ transform: 'translateX(-50%)' }}>
+                <button
+                  type="button"
+                  onClick={handleUndo}
+                  disabled={!canUndo}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
+                  title="Ångra (Cmd/Ctrl+Z)"
+                  aria-label="Ångra"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M9 7H5v4M5 11c1.5-3.2 4.6-5 8.2-5 5 0 8.8 3.9 8.8 8.8" /></svg>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleRedo}
+                  disabled={!canRedo}
+                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
+                  title="Gör om (Cmd/Ctrl+Shift+Z)"
+                  aria-label="Gör om"
+                >
+                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M15 7h4v4M19 11c-1.5-3.2-4.6-5-8.2-5C5.8 6 2 9.9 2 14.8" /></svg>
+                </button>
+              </div>
+
             </div>
+
+            {/* Mobile stats bar — single scrollable row */}
+            {isMobile && (
+              <div className="flex-none bg-white border-t border-[#d9d9d9] overflow-x-auto pf-hide-scrollbar">
+                <div className="flex items-center px-3 py-2 min-w-max gap-0">
+                  <div className="flex flex-col items-center leading-none px-[10px]">
+                    <span className="text-[9px] text-[#bbb] mb-0.5">Area</span>
+                    <span className="text-[13px] font-semibold text-[#1a1a1a]">{stats.area.toFixed(2)} m²</span>
+                  </div>
+                  <div className="w-px h-6 bg-[#efefef] flex-shrink-0" />
+                  <div className="flex flex-col items-center leading-none px-[10px]">
+                    <span className="text-[9px] text-[#bbb] mb-0.5">Förp.</span>
+                    <span className="text-[13px] font-semibold text-[#1a1a1a]">{stats.packageCount} st</span>
+                  </div>
+                  <div className="w-px h-6 bg-[#efefef] flex-shrink-0" />
+                  <div className="flex flex-col items-center leading-none px-[10px]">
+                    <span className="text-[9px] text-[#bbb] mb-0.5">Åtgång br.</span>
+                    <span className="text-[13px] font-semibold text-[#1a1a1a]">{stats.plankCount} st</span>
+                  </div>
+                  <div className="w-px h-6 bg-[#efefef] flex-shrink-0" />
+                  <div className="flex flex-col items-center leading-none px-[10px]">
+                    <span className="text-[9px] text-[#bbb] mb-0.5">Överskott</span>
+                    <span className="text-[13px] font-semibold text-[#1a1a1a]">{mobileLeftoverPlanks} st</span>
+                  </div>
+                  <div className="w-px h-6 bg-[#efefef] flex-shrink-0" />
+                  <div className="flex flex-col items-center leading-none px-[10px]">
+                    <span className="text-[9px] text-[#bbb] mb-0.5">Spill tot</span>
+                    <span className={`text-[13px] font-semibold ${parseFloat(mobileSpillPercent) <= 15 ? 'text-[#3D8B37]' : 'text-[#c8001a]'}`}>{mobileSpillPercent}%</span>
+                  </div>
+                  {mobileTotalPrice != null && (
+                    <>
+                      <div className="w-px h-6 bg-[#efefef] flex-shrink-0" />
+                      <div className="flex flex-col items-center leading-none px-[10px]">
+                        <span className="text-[9px] text-[#bbb] mb-0.5 whitespace-nowrap">Summa</span>
+                        <span className="text-[13px] font-black text-[#c8001a] whitespace-nowrap leading-none">{mobileTotalPrice} kr</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Mobile: inline product panel below canvas */}
+            {isMobile && (
+              <MobileProductPanel
+                products={activeDesign.products}
+                activeProductId={activeProductId}
+                activeDesignId={activeDesign.id}
+                activeDesignName={activeDesign.name}
+                isManualActive={effectiveIsManualActive}
+                manualFloorSettings={manualFloorSettings}
+                onActivateManual={activateManual}
+                onManualFloorSettingsChange={handleManualSettingsChange}
+                onAddProduct={addProduct}
+                onRemoveProduct={removeProduct}
+                onSelectProduct={activateProduct}
+                settings={settings}
+              />
+            )}
           </main>
 
-          <div className="col-[3] min-h-0 min-w-0"></div>
+          {!isMobile && <div className="col-[3] min-h-0 min-w-0"></div>}
         </div>
 
         {tabContextMenu && (

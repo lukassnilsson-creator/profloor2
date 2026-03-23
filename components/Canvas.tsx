@@ -123,6 +123,7 @@ const Canvas: React.FC<CanvasProps> = ({
   stats,
   productInfo
 }) => {
+  const isTouchDevice = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const toolPanelRef = useRef<HTMLDivElement>(null);
@@ -131,6 +132,8 @@ const Canvas: React.FC<CanvasProps> = ({
   const gestureScaleRef = useRef<number | null>(null);
   const toolPanelDragRef = useRef<ToolPanelDragState | null>(null);
   const backgroundImageRef = useRef<HTMLImageElement | null>(null);
+  const pointsRef = useRef(points);
+  const isPinchingRef = useRef(false);
   const [backgroundImageVersion, setBackgroundImageVersion] = useState(0);
   const [hoverPlank, setHoverPlank] = useState<PlankInstance | null>(null);
   const [hoverWastePieceIdx, setHoverWastePieceIdx] = useState<number | null>(null);
@@ -151,6 +154,8 @@ const Canvas: React.FC<CanvasProps> = ({
     scaleRef.current = scale;
     offsetRef.current = offset;
   }, [scale, offset]);
+
+  useEffect(() => { pointsRef.current = points; }, [points]);
 
   useEffect(() => {
     if (!backgroundDrawing?.src) {
@@ -212,7 +217,7 @@ const Canvas: React.FC<CanvasProps> = ({
   }, [clampToolPanelOffset]);
 
   useEffect(() => {
-    const handleMouseMove = (event: MouseEvent) => {
+    const handlePanelPointerMove = (event: PointerEvent) => {
       const dragState = toolPanelDragRef.current;
       if (!dragState) return;
       setToolPanelOffset(
@@ -223,15 +228,15 @@ const Canvas: React.FC<CanvasProps> = ({
       );
     };
 
-    const handleMouseUp = () => {
+    const handlePanelPointerUp = () => {
       toolPanelDragRef.current = null;
     };
 
-    window.addEventListener('mousemove', handleMouseMove);
-    window.addEventListener('mouseup', handleMouseUp);
+    window.addEventListener('pointermove', handlePanelPointerMove);
+    window.addEventListener('pointerup', handlePanelPointerUp);
     return () => {
-      window.removeEventListener('mousemove', handleMouseMove);
-      window.removeEventListener('mouseup', handleMouseUp);
+      window.removeEventListener('pointermove', handlePanelPointerMove);
+      window.removeEventListener('pointerup', handlePanelPointerUp);
     };
   }, [clampToolPanelOffset]);
 
@@ -241,6 +246,7 @@ const Canvas: React.FC<CanvasProps> = ({
     draggingIdx,
     draggingEdgeIdx,
     handlePrimaryDown,
+    handleTouchDown,
     handlePointerMove,
     handlePointerUp,
     deletePoint
@@ -249,7 +255,7 @@ const Canvas: React.FC<CanvasProps> = ({
     setPoints,
     snapToGrid,
     gridSize,
-    interactionScale: scale
+    interactionScale: isTouchDevice ? scale / 3 : scale
   });
 
   const edgeLengths = useMemo(() => {
@@ -537,7 +543,8 @@ const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('resize', handleResize);
   }, [draw, backgroundImageVersion]);
 
-  const handleMouseDown = (event: React.MouseEvent) => {
+  const handleMouseDown = (event: React.PointerEvent) => {
+    if (!event.isPrimary || isPinchingRef.current) return;
     if (contextMenu) {
       setContextMenu(null);
       return;
@@ -552,7 +559,17 @@ const Canvas: React.FC<CanvasProps> = ({
     const my = (event.clientY - rect.top - canvas.height / 2 - offset.y) / scale;
     const cursor = { x: mx, y: my };
 
-    const result = handlePrimaryDown(cursor);
+    // Touch: compute hover state inline (no prior hover phase on touch)
+    // Mouse: rely on existing hoverIdx/closestEdgeIdx set by pointermove
+    const result = event.pointerType !== 'mouse'
+      ? handleTouchDown(cursor)
+      : handlePrimaryDown(cursor);
+
+    // Capture pointer on touch so move/up events keep arriving even outside the element
+    if (event.pointerType !== 'mouse') {
+      try { (event.currentTarget as HTMLCanvasElement).setPointerCapture(event.pointerId); } catch {}
+    }
+
     if (result.startedDrag || result.insertedPoint) {
       onRequestHistorySnapshot();
       return;
@@ -562,7 +579,8 @@ const Canvas: React.FC<CanvasProps> = ({
     setLastPanPos({ x: event.clientX, y: event.clientY });
   };
 
-  const handleMouseMove = (event: React.MouseEvent) => {
+  const handleMouseMove = (event: React.PointerEvent) => {
+    if (!event.isPrimary || isPinchingRef.current) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -730,16 +748,123 @@ const Canvas: React.FC<CanvasProps> = ({
       gestureScaleRef.current = null;
     };
 
+    // ── Touch handlers: pinch zoom + long press + double tap ──
+    let pinchDistance: number | null = null;
+    let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+    let longPressTouchStart: { x: number; y: number } | null = null;
+    let lastTapTime = 0;
+    let lastTapPos = { x: 0, y: 0 };
+
+    const handleTouchStart = (event: TouchEvent) => {
+      if (event.touches.length === 2) {
+        // Two fingers: start pinch, cancel long press
+        isPinchingRef.current = true;
+        if (longPressTimer !== null) { clearTimeout(longPressTimer); longPressTimer = null; }
+        const t1 = event.touches[0];
+        const t2 = event.touches[1];
+        pinchDistance = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        event.preventDefault();
+        return;
+      }
+      if (event.touches.length === 1) {
+        isPinchingRef.current = false;
+        const touch = event.touches[0];
+        const now = Date.now();
+        // Double tap detection
+        if (now - lastTapTime < 300 && Math.hypot(touch.clientX - lastTapPos.x, touch.clientY - lastTapPos.y) < 30) {
+          lastTapTime = 0;
+          const cursor = getCursorFromClientPosition(touch.clientX, touch.clientY);
+          if (cursor) {
+            const currentScale = scaleRef.current;
+            const tapHoverIdx = getHoverPointIndex(pointsRef.current, cursor, currentScale / 3);
+            if (tapHoverIdx !== null) {
+              const snapped = forceSnapPointTo90(pointsRef.current, tapHoverIdx);
+              if (snapped !== pointsRef.current) setPoints(snapped);
+            }
+          }
+          event.preventDefault();
+          return;
+        }
+        lastTapTime = now;
+        lastTapPos = { x: touch.clientX, y: touch.clientY };
+        // Long press → context menu (after 550ms)
+        longPressTouchStart = { x: touch.clientX, y: touch.clientY };
+        const lx = touch.clientX;
+        const ly = touch.clientY;
+        longPressTimer = setTimeout(() => {
+          longPressTimer = null;
+          const cursor = getCursorFromClientPosition(lx, ly);
+          if (!cursor) return;
+          const currentScale = scaleRef.current;
+          const pts = pointsRef.current;
+          const pointIdx = getHoverPointIndex(pts, cursor, currentScale / 3);
+          if (pointIdx !== null) {
+            setContextMenu({ kind: 'point', x: lx, y: ly, pointIdx });
+            return;
+          }
+          if (pts.length >= 3) {
+            const safeScale = Math.max(currentScale, 0.0001);
+            const edgeIdx = getClosestEdgeInsertIndex(pts, cursor, safeScale / 3, null);
+            if (edgeIdx !== null) {
+              setContextMenu({ kind: 'edge', x: lx, y: ly, edgeIdx, cursor });
+              return;
+            }
+          }
+          setContextMenu({ kind: 'canvas', x: lx, y: ly });
+        }, 550);
+      }
+    };
+
+    const handleTouchMove = (event: TouchEvent) => {
+      if (event.touches.length === 2 && pinchDistance !== null) {
+        const t1 = event.touches[0];
+        const t2 = event.touches[1];
+        const newDist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
+        const midX = (t1.clientX + t2.clientX) / 2;
+        const midY = (t1.clientY + t2.clientY) / 2;
+        const factor = newDist / pinchDistance;
+        zoomAtPointer(midX, midY, scaleRef.current * factor);
+        pinchDistance = newDist;
+        event.preventDefault();
+        return;
+      }
+      // Cancel long press if finger moved more than 10px
+      if (event.touches.length === 1 && longPressTimer !== null && longPressTouchStart !== null) {
+        const touch = event.touches[0];
+        if (Math.hypot(touch.clientX - longPressTouchStart.x, touch.clientY - longPressTouchStart.y) > 10) {
+          clearTimeout(longPressTimer);
+          longPressTimer = null;
+        }
+      }
+    };
+
+    const handleTouchEnd = (event: TouchEvent) => {
+      if (longPressTimer !== null) { clearTimeout(longPressTimer); longPressTimer = null; }
+      longPressTouchStart = null;
+      if (event.touches.length < 2) {
+        pinchDistance = null;
+        // Small delay before clearing isPinching so the pointer-up handler doesn't misfire
+        setTimeout(() => { isPinchingRef.current = false; }, 50);
+      }
+    };
+
     container.addEventListener('wheel', handleWheel, { passive: false });
     container.addEventListener('gesturestart', handleGestureStart as EventListener, { passive: false });
     container.addEventListener('gesturechange', handleGestureChange as EventListener, { passive: false });
     container.addEventListener('gestureend', handleGestureEnd as EventListener);
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd);
 
     return () => {
       container.removeEventListener('wheel', handleWheel);
       container.removeEventListener('gesturestart', handleGestureStart as EventListener);
       container.removeEventListener('gesturechange', handleGestureChange as EventListener);
       container.removeEventListener('gestureend', handleGestureEnd as EventListener);
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+      if (longPressTimer !== null) clearTimeout(longPressTimer);
     };
   }, [setOffset, zoomAtPointer]);
 
@@ -771,6 +896,9 @@ const Canvas: React.FC<CanvasProps> = ({
         setContextMenu({ kind: 'canvas', x: event.clientX, y: event.clientY });
       }}
       style={{
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        touchAction: 'none',
         cursor: isPanning
           ? 'grabbing'
           : draggingIdx !== null || draggingEdgeIdx !== null
@@ -784,9 +912,10 @@ const Canvas: React.FC<CanvasProps> = ({
     >
       <canvas
         ref={canvasRef}
-        onMouseDown={handleMouseDown}
-        onMouseMove={handleMouseMove}
-        onMouseUp={() => {
+        onPointerDown={handleMouseDown}
+        onPointerMove={handleMouseMove}
+        onPointerUp={(e) => {
+          if (!e.isPrimary) return;
           handlePointerUp();
           setIsPanning(false);
         }}
@@ -796,11 +925,14 @@ const Canvas: React.FC<CanvasProps> = ({
             if (snapped !== points) setPoints(snapped);
           }
         }}
-        onMouseLeave={() => {
+        onPointerLeave={(e) => {
+          if (!e.isPrimary) return;
+          if (e.pointerType !== 'mouse') return; // touch has pointer capture — don't cancel on leave
           handlePointerUp();
           setIsPanning(false);
         }}
         className="block h-full w-full"
+        style={{ touchAction: 'none', userSelect: 'none', WebkitUserSelect: 'none' }}
       />
 
       {showEdgeLengths && points.length >= 2 && points.map((point, index) => {

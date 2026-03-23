@@ -84,6 +84,7 @@ export default function CanvasAdapter({
   const containerRef = useRef<HTMLDivElement>(null);
   const importInputRef = useRef<HTMLInputElement>(null);
   const justeraRef = useRef<HTMLDivElement>(null);
+  const didAutoZoomRef = useRef(false);
 
   const [points, setPoints] = useState<Point[]>(DEFAULT_POINTS);
   const [settings, setSettings] = useState<PlankSettings>({ ...INITIAL_SETTINGS });
@@ -100,16 +101,16 @@ export default function CanvasAdapter({
   const [undoStack, setUndoStack] = useState<Point[][]>([]);
   const [redoStack, setRedoStack] = useState<Point[][]>([]);
 
-  // Close Justera panel on outside click
+  // Close Justera panel on outside click/tap
   useEffect(() => {
     if (!isJusteraOpen) return;
-    const handle = (e: MouseEvent) => {
+    const handle = (e: PointerEvent) => {
       if (justeraRef.current && !justeraRef.current.contains(e.target as Node)) {
         setIsJusteraOpen(false);
       }
     };
-    document.addEventListener('mousedown', handle);
-    return () => document.removeEventListener('mousedown', handle);
+    document.addEventListener('pointerdown', handle);
+    return () => document.removeEventListener('pointerdown', handle);
   }, [isJusteraOpen]);
 
   const onToggleBackgroundDrawing = useCallback(() => setShowBackgroundDrawing((v) => !v), []);
@@ -157,6 +158,20 @@ export default function CanvasAdapter({
   }, [handleUndo, handleRedo]);
   const onRemoveBackgroundDrawing = useCallback(() => setBackgroundDrawing(null), []);
   const onResetDesign = useCallback(() => setPoints(DEFAULT_POINTS.map((p) => ({ ...p }))), []);
+
+  // Auto zoom-extents on mobile on first render
+  useEffect(() => {
+    if (didAutoZoomRef.current) return;
+    const isMobileView = typeof window !== 'undefined' && window.innerWidth < 640;
+    if (!isMobileView) return;
+    // Small delay to let canvas size settle
+    const timer = setTimeout(() => {
+      didAutoZoomRef.current = true;
+      handleZoomExtents();
+    }, 150);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleZoomExtents = useCallback(() => {
     if (points.length === 0) return;
@@ -291,9 +306,12 @@ export default function CanvasAdapter({
       <div
         style={{ height: `${containerHeight}px` }}
         className="rounded-t-xl border border-b-0 border-[#EAE6E3] bg-white relative overflow-hidden"
+        onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+        onDrop={(e) => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) handleImportFile(file); }}
       >
-        {/* ── Top-left: Optimera / Justera / Flip ── */}
-        <div className="absolute top-3 left-3 z-40 flex items-center gap-1.5">
+        {/* ── Top bar: single row left↔right, never overlaps on mobile ── */}
+        <div className="absolute top-3 left-3 right-3 z-40 flex items-center justify-between gap-1.5 pointer-events-none">
+        <div className="flex items-center gap-1.5 pointer-events-auto">
           {/* Optimera */}
           <button
             onClick={handleOptimize}
@@ -386,28 +404,8 @@ export default function CanvasAdapter({
           </button>
         </div>
 
-        {/* ── Top-right: Ångra / Gör om / Importera / Dela / Spara ── */}
-        <div className="absolute top-3 right-3 z-40 flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={handleUndo}
-            disabled={undoStack.length === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-[#DAD6D2] bg-white shadow-sm text-[#4a4a4a] hover:bg-[#f5f5f5] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            title="Ångra (Cmd+Z)"
-            aria-label="Ångra"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M9 7H5v4M5 11c1.5-3.2 4.6-5 8.2-5 5 0 8.8 3.9 8.8 8.8" /></svg>
-          </button>
-          <button
-            type="button"
-            onClick={handleRedo}
-            disabled={redoStack.length === 0}
-            className="flex h-8 w-8 items-center justify-center rounded-full border border-[#DAD6D2] bg-white shadow-sm text-[#4a4a4a] hover:bg-[#f5f5f5] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-            title="Gör om (Cmd+Shift+Z)"
-            aria-label="Gör om"
-          >
-            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M15 7h4v4M19 11c-1.5-3.2-4.6-5-8.2-5C5.8 6 2 9.9 2 14.8" /></svg>
-          </button>
+        {/* ── Top-right: Importera / Dela / Spara ── */}
+        <div className="flex items-center gap-1.5 pointer-events-auto">
           <input
             ref={importInputRef}
             type="file"
@@ -419,20 +417,20 @@ export default function CanvasAdapter({
           <button
             type="button"
             onClick={() => importInputRef.current?.click()}
-            className="h-8 px-3 rounded-full bg-white border border-[#DAD6D2] shadow-sm flex items-center gap-1.5 text-[11px] font-medium hover:bg-[#f5f5f5] transition-colors"
+            className="hidden sm:flex h-8 px-3 rounded-full bg-white border border-[#DAD6D2] shadow-sm items-center gap-1.5 text-[11px] font-medium hover:bg-[#f5f5f5] transition-colors"
             aria-label="Importera ritning"
           >
             <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            Importera ritning
+            <span className="hidden sm:inline">Importera ritning</span>
           </button>
           <button
             type="button"
             onClick={handleShare}
-            className="h-8 px-3 rounded-full bg-white border border-[#DAD6D2] shadow-sm flex items-center gap-1.5 text-[11px] font-medium hover:bg-[#f5f5f5] transition-colors"
+            className="h-8 px-2 sm:px-3 rounded-full bg-white border border-[#DAD6D2] shadow-sm flex items-center gap-1.5 text-[11px] font-medium hover:bg-[#f5f5f5] transition-colors"
             aria-label="Dela golvdesign"
           >
             <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
-            {shareCopied ? 'Kopierat!' : 'Dela'}
+            <span className="hidden sm:inline">{shareCopied ? 'Kopierat!' : 'Dela'}</span>
           </button>
           <button
             type="button"
@@ -440,11 +438,36 @@ export default function CanvasAdapter({
               if (!isAuthed) { onRequestSignIn?.(); return; }
               alert('Design sparad (demo)');
             }}
-            className="h-8 px-3 rounded-full bg-white border border-[#DAD6D2] shadow-sm flex items-center gap-1.5 text-[11px] font-medium hover:bg-[#f5f5f5] transition-colors"
+            className="hidden sm:flex h-8 px-3 rounded-full bg-white border border-[#DAD6D2] shadow-sm items-center gap-1.5 text-[11px] font-medium hover:bg-[#f5f5f5] transition-colors"
             aria-label="Spara design"
           >
             <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
-            Spara
+            <span className="hidden sm:inline">Spara</span>
+          </button>
+        </div>
+        </div>{/* end top bar wrapper */}
+
+        {/* ── Bottom center: Ångra / Gör om ── */}
+        <div className="absolute bottom-3 left-1/2 z-40 flex items-center gap-1.5" style={{ transform: 'translateX(-50%)' }}>
+          <button
+            type="button"
+            onClick={handleUndo}
+            disabled={undoStack.length === 0}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.07)] text-[#4a4a4a] hover:bg-[#f0f0f0] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            title="Ångra (Cmd+Z)"
+            aria-label="Ångra"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M9 7H5v4M5 11c1.5-3.2 4.6-5 8.2-5 5 0 8.8 3.9 8.8 8.8" /></svg>
+          </button>
+          <button
+            type="button"
+            onClick={handleRedo}
+            disabled={redoStack.length === 0}
+            className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white shadow-[0_2px_8px_rgba(0,0,0,0.07)] text-[#4a4a4a] hover:bg-[#f0f0f0] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            title="Gör om (Cmd+Shift+Z)"
+            aria-label="Gör om"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M15 7h4v4M19 11c-1.5-3.2-4.6-5-8.2-5C5.8 6 2 9.9 2 14.8" /></svg>
           </button>
         </div>
 
@@ -498,45 +521,87 @@ export default function CanvasAdapter({
         />
       </div>
 
-      {/* ── Bottom bar: flat full-width stats + update button ── */}
-      <div className="rounded-b-xl border border-t border-[#EAE6E3] bg-white flex items-center px-5 gap-0" style={{ height: `${BOTTOM_BAR_H}px` }}>
+      {/* ── Bottom bar ── */}
+      <div className="rounded-b-xl border border-t border-[#EAE6E3] bg-white">
 
-        <StatCell label="Area" value={`${stats.area.toFixed(2)} m²`} />
-        <Divider />
-        <StatCell label="Förp." value={`${stats.packageCount} st`} />
-        <Divider />
-        <StatCell label="Åtgång br." value={`${stats.plankCount} st`} />
-        <Divider />
-        <StatCell label="Överskott br." value={`${leftoverPlanks} st`} />
-        <Divider />
-        <StatCell
-          label="Spill tot"
-          value={`${spillTotPercent}%`}
-          valueClass={spillTotPercent <= 15 ? 'text-[#3D8B37]' : 'text-[#c8001a]'}
-        />
-        <Divider />
-
-        {/* Summa — label + price inline */}
-        <div className="flex items-baseline gap-2 px-4 flex-shrink-0">
-          <span className="text-[10px] text-[#aaa] whitespace-nowrap">Summa</span>
-          <span className="text-[15px] font-black text-[#c8001a] whitespace-nowrap leading-none">
-            {totalPrice.toLocaleString('sv-SE')} kr
-          </span>
+        {/* Mobile: 2-row layout */}
+        <div className="flex sm:hidden flex-col">
+          <div className="flex items-center justify-around px-3 py-2 border-b border-[#EAE6E3]">
+            <StatCell label="Förp." value={`${stats.packageCount} st`} />
+            <Divider />
+            <StatCell label="Åtgång br." value={`${stats.plankCount} st`} />
+            <Divider />
+            <StatCell label="Överskott br." value={`${leftoverPlanks} st`} />
+            <Divider />
+            <StatCell
+              label="Spill tot"
+              value={`${spillTotPercent}%`}
+              valueClass={spillTotPercent <= 15 ? 'text-[#3D8B37]' : 'text-[#c8001a]'}
+            />
+          </div>
+          <div className="flex items-center px-3 py-2 gap-2">
+            <StatCell label="Area" value={`${stats.area.toFixed(2)} m²`} />
+            <Divider />
+            <div className="flex items-baseline gap-1.5 px-2">
+              <span className="text-[10px] text-[#aaa] whitespace-nowrap">Summa</span>
+              <span className="text-[15px] font-black text-[#c8001a] whitespace-nowrap leading-none">
+                {totalPrice.toLocaleString('sv-SE')} kr
+              </span>
+            </div>
+            <div className="flex-shrink-0 ml-auto">
+              <button
+                type="button"
+                onClick={() => onAddToCart?.(stats.area)}
+                className="h-[36px] px-4 rounded-full text-white text-[12px] font-semibold flex items-center transition-colors whitespace-nowrap"
+                style={{ backgroundColor: '#666666' }}
+              >
+                Uppdatera m²
+              </button>
+            </div>
+          </div>
         </div>
 
-        {/* CTA */}
-        <div className="flex-shrink-0 ml-auto">
-          <button
-            type="button"
-            onClick={() => onAddToCart?.(stats.area)}
-            className="h-[38px] px-5 rounded-full text-white text-[12px] font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap" style={{ backgroundColor: '#666666' }} onMouseEnter={e => (e.currentTarget.style.backgroundColor='#555')} onMouseLeave={e => (e.currentTarget.style.backgroundColor='#666666')}
-          >
-            Uppdatera m²
-            <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.4" viewBox="0 0 24 24" aria-hidden="true">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-            </svg>
-          </button>
+        {/* Desktop: single scrollable row */}
+        <div className="hidden sm:block overflow-x-auto" style={{ height: `${BOTTOM_BAR_H}px` }}>
+          <div className="flex items-center px-5 gap-0 min-w-max h-full">
+            <StatCell label="Area" value={`${stats.area.toFixed(2)} m²`} />
+            <Divider />
+            <StatCell label="Förp." value={`${stats.packageCount} st`} />
+            <Divider />
+            <StatCell label="Åtgång br." value={`${stats.plankCount} st`} />
+            <Divider />
+            <StatCell label="Överskott br." value={`${leftoverPlanks} st`} />
+            <Divider />
+            <StatCell
+              label="Spill tot"
+              value={`${spillTotPercent}%`}
+              valueClass={spillTotPercent <= 15 ? 'text-[#3D8B37]' : 'text-[#c8001a]'}
+            />
+            <Divider />
+            <div className="flex items-baseline gap-2 px-4 flex-shrink-0">
+              <span className="text-[10px] text-[#aaa] whitespace-nowrap">Summa</span>
+              <span className="text-[15px] font-black text-[#c8001a] whitespace-nowrap leading-none">
+                {totalPrice.toLocaleString('sv-SE')} kr
+              </span>
+            </div>
+            <div className="flex-shrink-0 ml-auto">
+              <button
+                type="button"
+                onClick={() => onAddToCart?.(stats.area)}
+                className="h-[38px] px-5 rounded-full text-white text-[12px] font-semibold flex items-center gap-1.5 transition-colors whitespace-nowrap"
+                style={{ backgroundColor: '#666666' }}
+                onMouseEnter={e => (e.currentTarget.style.backgroundColor = '#555')}
+                onMouseLeave={e => (e.currentTarget.style.backgroundColor = '#666666')}
+              >
+                Uppdatera m²
+                <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2.4" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            </div>
+          </div>
         </div>
+
       </div>
     </div>
   );

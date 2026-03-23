@@ -68,16 +68,16 @@ export default function DemoPage() {
 
       {/* ── Header ── */}
       <header className="bg-white border-b border-[#e8e8e8] sticky top-0 z-50 shadow-[0_1px_4px_rgba(0,0,0,0.05)]">
-        <div className="max-w-[1500px] mx-auto px-6 h-[56px] flex items-center gap-6">
+        <div className="max-w-[1500px] mx-auto px-4 md:px-6 h-[56px] flex items-center gap-3 md:gap-6">
           <a href="#" aria-label="renoverahuset.se - till startsidan" className="flex-shrink-0">
-            <img src="/ref-assets/renoverahuset_logo.png" alt="renoverahuset.se" className="h-[32px] w-auto object-contain" />
+            <img src="/ref-assets/renoverahuset_logo.png" alt="renoverahuset.se" className="h-[28px] md:h-[32px] w-auto object-contain" />
           </a>
           <nav className="hidden lg:flex items-center gap-5 text-[12px] font-medium text-[#333]" aria-label="Huvudmeny">
             {['Golv & Vägg', 'Kök & Bad', 'Byggmaterial', 'Trädgård', 'Verktyg'].map(l => (
               <a key={l} href="#" className="hover:text-[#e3000b] transition-colors whitespace-nowrap">{l}</a>
             ))}
           </nav>
-          <div className="flex-1 max-w-md">
+          <div className="hidden sm:block flex-1 max-w-md">
             <div className="relative">
               <input type="search" placeholder="Sök produkt, varumärke eller kategori..." aria-label="Sök"
                 className="w-full h-[36px] pl-4 pr-10 text-[12px] rounded-full border border-[#d5d5d5] bg-[#f8f7f6] outline-none focus:border-[#e3000b] focus:bg-white transition-colors" />
@@ -86,7 +86,7 @@ export default function DemoPage() {
               </div>
             </div>
           </div>
-          <div className="flex items-center gap-4 ml-auto">
+          <div className="flex items-center gap-3 md:gap-4 ml-auto">
             <button className="text-[#555] hover:text-[#e3000b] transition-colors" aria-label="Favoriter">
               <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
             </button>
@@ -111,7 +111,7 @@ export default function DemoPage() {
 
       <main>
         {/* ── Product hero ── */}
-        <div className="max-w-[1500px] mx-auto px-6 pt-5 pb-0">
+        <div className="max-w-[1500px] mx-auto px-4 md:px-6 pt-5 pb-0">
 
           {/* Breadcrumb */}
           <nav aria-label="Brödsmulor" className="text-[11px] text-[#999] mb-5 flex items-center gap-1 flex-wrap">
@@ -126,10 +126,10 @@ export default function DemoPage() {
           </nav>
 
           {/* Two-column product layout: left ~700px (5 cols), right ~800px (7 cols) */}
-          <div className="grid grid-cols-12 gap-10">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-10">
 
             {/* ── Left: product images (5 cols ≈ 700px) ── */}
-            <div className="col-span-5">
+            <div className="col-span-full md:col-span-5">
               <div className="rounded-lg overflow-hidden bg-[#f8f6f4] border border-[#eae6e2]">
                 <img
                   src="/ref-assets/room-photo.png"
@@ -152,7 +152,7 @@ export default function DemoPage() {
             </div>
 
             {/* ── Right: product info (7 cols ≈ 800px) ── */}
-            <div className="col-span-7">
+            <div className="col-span-full md:col-span-7">
 
               {/* Brand label */}
               <div className="text-[11px] font-semibold text-[#888] uppercase tracking-widest mb-1.5">Parkettgolv Kährs</div>
@@ -222,7 +222,7 @@ export default function DemoPage() {
                       <CanvasAdapter
                         isAuthed={!!(authUser || isPreview)}
                         onRequestSignIn={handleSignIn}
-                        containerHeight={520}
+                        containerHeight={typeof window !== 'undefined' && window.innerWidth < 640 ? 360 : 520}
                         pricePerM2={479}
                         onAddToCart={(area) => setQty(Math.max(1, Math.ceil(area)))}
                         onFirstEdit={() => logEvent('demo_floor_designed', authUser?.id ?? null)}
@@ -281,9 +281,9 @@ export default function DemoPage() {
         </div>
 
         {/* ── Beskrivning + Egenskaper ── */}
-        <div className="max-w-[1500px] mx-auto px-6 py-10">
-          <div className="grid grid-cols-12 gap-10">
-            <div className="col-span-7">
+        <div className="max-w-[1500px] mx-auto px-4 md:px-6 py-8 md:py-10">
+          <div className="grid grid-cols-1 md:grid-cols-12 gap-6 md:gap-10">
+            <div className="col-span-full md:col-span-7">
               <h2 className="text-[19px] font-bold mb-4 text-[#1a1a1a]">Beskrivning</h2>
               <div className="text-[13px] text-[#555] leading-[1.9] space-y-3">
                 <p>Kährs Lecco är ett klassiskt parkettgolv med ek 3-stavs design och en silkesmatt lackytybehandling som ger ett naturligt och tidlöst uttryck. Golvet är 15 mm tjockt och passar utmärkt i vardagsrum, sovrum och korridorer.</p>
@@ -291,7 +291,7 @@ export default function DemoPage() {
                 <p>Produkten uppfyller kraven för Svanen-märkning och är tillverkad av FSC-certifierat virke.</p>
               </div>
             </div>
-            <div className="col-span-5">
+            <div className="col-span-full md:col-span-5">
               <h3 className="text-[19px] font-bold mb-4 text-[#1a1a1a]">Egenskaper</h3>
               <table className="w-full text-[13px]" aria-label="Produktegenskaper">
                 <tbody>
@@ -321,10 +321,10 @@ export default function DemoPage() {
         </div>
 
         {/* ── Related products ── */}
-        <div className="bg-[#f8f6f4] border-t border-[#ede9e4] py-10 px-6">
+        <div className="bg-[#f8f6f4] border-t border-[#ede9e4] py-8 md:py-10 px-4 md:px-6">
           <div className="max-w-[1500px] mx-auto">
             <h2 className="text-[19px] font-bold mb-6 text-[#1a1a1a]">Andra produkter i serien Lecco från Kährs</h2>
-            <div className="grid grid-cols-4 gap-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 md:gap-5">
               {[
                 { name: 'Lecco Ek Naturlack Längd 2000 mm', price: '459', img: '/ref-assets/floor-texture.png' },
                 { name: 'Lecco Ask 3-stav Mattlack Längd 2000 mm', price: '489', img: '/ref-assets/room-photo.png' },

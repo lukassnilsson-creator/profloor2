@@ -20,6 +20,7 @@
     font-family: 'IBM Plex Sans', sans-serif;
     background: var(--pf-bg);
     color: var(--pf-text);
+    touch-action: pan-x pan-y;
   }
 
   #root {

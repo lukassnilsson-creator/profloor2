@@ -22,6 +22,7 @@ interface UsePlanEditorResult {
   draggingIdx: number | null;
   draggingEdgeIdx: number | null;
   handlePrimaryDown: (cursor: Point) => PrimaryDownResult;
+  handleTouchDown: (cursor: Point) => PrimaryDownResult;
   handlePointerMove: (cursor: Point) => { hoverIdx: number | null; isDragging: boolean };
   handlePointerUp: () => void;
   deletePoint: (idx: number) => Point[];
@@ -29,6 +30,20 @@ interface UsePlanEditorResult {
 }
 
 const MIN_SCALE = 0.0001;
+const MAX_ROOM_SIZE_MM = 18000;
+
+const withinSizeLimit = (pts: Point[]): boolean => {
+  if (pts.length === 0) return true;
+  let minX = pts[0].x, maxX = pts[0].x;
+  let minY = pts[0].y, maxY = pts[0].y;
+  for (const p of pts) {
+    if (p.x < minX) minX = p.x;
+    if (p.x > maxX) maxX = p.x;
+    if (p.y < minY) minY = p.y;
+    if (p.y > maxY) maxY = p.y;
+  }
+  return (maxX - minX) <= MAX_ROOM_SIZE_MM && (maxY - minY) <= MAX_ROOM_SIZE_MM;
+};
 
 export const usePlanEditor = ({
   points,
@@ -84,6 +99,37 @@ export const usePlanEditor = ({
     return { startedDrag: false, insertedPoint: false };
   };
 
+  // Touch variant: computes hover state inline (no prior pointermove/hover phase on touch)
+  const handleTouchDown = (cursor: Point): PrimaryDownResult => {
+    // Points get a generous hit area (×3) — easy to tap corners with a finger
+    const safePointScale = Math.max(MIN_SCALE, interactionScale);
+    // Edges use a tighter hit area (×1.5) to avoid accidental drags
+    const safeEdgeScale = Math.max(MIN_SCALE, interactionScale * 2);
+
+    const immediateHoverIdx = getHoverPointIndex(points, cursor, safePointScale);
+
+    if (immediateHoverIdx !== null) {
+      setHoverIdx(immediateHoverIdx);
+      setDraggingIdx(immediateHoverIdx);
+      setVertexDragStart(cursor);
+      return { startedDrag: true, insertedPoint: false };
+    }
+
+    if (points.length >= 3) {
+      const immediateEdgeIdx = getClosestEdgeInsertIndex(points, cursor, safeEdgeScale, null);
+      if (immediateEdgeIdx !== null) {
+        const normal = computeEdgeNormal(points, immediateEdgeIdx);
+        setClosestEdgeIdx(immediateEdgeIdx);
+        setDraggingEdgeIdx(immediateEdgeIdx);
+        setEdgeDragState({ startCursor: cursor, originalPoints: [...points], normal });
+        return { startedDrag: true, insertedPoint: false };
+      }
+    }
+
+    // On touch, empty-canvas tap = pan (not add point — use long press context menu instead)
+    return { startedDrag: false, insertedPoint: false };
+  };
+
   const handlePointerMove = (cursor: Point) => {
     if (draggingIdx !== null) {
       let constrainedCursor = cursor;
@@ -98,14 +144,15 @@ export const usePlanEditor = ({
       }
       const nextPoints = [...points];
       nextPoints[draggingIdx] = getDraggedPoint(points, draggingIdx, constrainedCursor, snapToGrid, gridSize, false);
-      setPoints(nextPoints);
+      if (withinSizeLimit(nextPoints)) setPoints(nextPoints);
       return { hoverIdx, isDragging: true };
     }
 
     if (draggingEdgeIdx !== null && edgeDragState) {
       const delta = { x: cursor.x - edgeDragState.startCursor.x, y: cursor.y - edgeDragState.startCursor.y };
       const t = delta.x * edgeDragState.normal.x + delta.y * edgeDragState.normal.y;
-      setPoints(translateEdgeInPolygon(edgeDragState.originalPoints, draggingEdgeIdx, t));
+      const nextPoints = translateEdgeInPolygon(edgeDragState.originalPoints, draggingEdgeIdx, t);
+      if (withinSizeLimit(nextPoints)) setPoints(nextPoints);
       return { hoverIdx, isDragging: true };
     }
 
@@ -147,6 +194,7 @@ export const usePlanEditor = ({
     draggingIdx,
     draggingEdgeIdx,
     handlePrimaryDown,
+    handleTouchDown,
     handlePointerMove,
     handlePointerUp,
     deletePoint,

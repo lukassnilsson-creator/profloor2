@@ -183,10 +183,11 @@ export const computeEdgeNormal = (points: Point[], edgeIdx: number): Point => {
 };
 
 /**
- * Translates edge i purely along its own normal by `amount`.
- * The dragged edge keeps its exact original length and angle.
- * Each adjacent edge chain propagates the displacement while maintaining its original direction
- * (only scaling in length). A single "free" edge opposite the dragged edge absorbs any residual.
+ * Translates edge i along its own normal by `amount`.
+ * The two edge endpoints slide along their adjacent edges (maintaining adjacent edge directions).
+ * Computed as the intersection of the translated edge line with each adjacent edge line.
+ * Falls back to direct translation if adjacent edge is parallel (collinear sub-segment case).
+ * All other vertices are unchanged.
  */
 export const translateEdgeInPolygon = (points: Point[], edgeIdx: number, amount: number): Point[] => {
   const n = points.length;
@@ -200,63 +201,35 @@ export const translateEdgeInPolygon = (points: Point[], edgeIdx: number, amount:
   const normal = { x: -dy / len, y: dx / len };
   const delta = { x: amount * normal.x, y: amount * normal.y };
 
+  // Intersect line (px,py)+t*(d1x,d1y) with line (qx,qy)+s*(d2x,d2y).
+  // Returns point on first line at intersection, or null if parallel.
+  const lineIntersect = (
+    px: number, py: number, d1x: number, d1y: number,
+    qx: number, qy: number, d2x: number, d2y: number
+  ): { x: number; y: number } | null => {
+    const det = d1x * (-d2y) - d1y * (-d2x);
+    if (Math.abs(det) < 0.0001) return null;
+    const t = ((-d2y) * (qx - px) - (-d2x) * (qy - py)) / det;
+    return { x: px + t * d1x, y: py + t * d1y };
+  };
+
   const newPoints = [...points];
-  newPoints[edgeIdx] = { x: A.x + delta.x, y: A.y + delta.y };
-  newPoints[(edgeIdx + 1) % n] = { x: B.x + delta.x, y: B.y + delta.y };
 
-  const backwardSteps = Math.floor((n - 2) / 2);
-  const forwardSteps = n - 2 - backwardSteps;
+  // New position for A: slide along adjacent edge prevPt→A
+  const prevPt = points[(edgeIdx - 1 + n) % n];
+  const newA = lineIntersect(
+    A.x + delta.x, A.y + delta.y, dx, dy,
+    prevPt.x, prevPt.y, A.x - prevPt.x, A.y - prevPt.y
+  );
+  newPoints[edgeIdx] = newA ?? { x: A.x + delta.x, y: A.y + delta.y };
 
-  // Forward chain: from p[edgeIdx+2] going forward — run first to get fwdEndDelta
-  let cur = { ...delta };
-  for (let step = 1; step <= forwardSteps; step++) {
-    const j = (edgeIdx + 1 + step) % n;
-    const jPrev = (j - 1 + n) % n;
-    const ex = points[j].x - points[jPrev].x;
-    const ey = points[j].y - points[jPrev].y;
-    const elen = Math.sqrt(ex * ex + ey * ey);
-    if (elen < 0.0001) continue;
-    const along = (cur.x * ex + cur.y * ey) / elen;
-    cur = { x: cur.x - along * ex / elen, y: cur.y - along * ey / elen };
-    newPoints[j] = { x: points[j].x + cur.x, y: points[j].y + cur.y };
-  }
-  const fwdEndDelta = { ...cur };
-
-  // Backward chain: from p[edgeIdx-1] going backward, using 2x2 solve per vertex
-  cur = { ...delta };
-  for (let step = 1; step <= backwardSteps; step++) {
-    const j = ((edgeIdx - step) + n) % n;
-    const jNext = (j + 1) % n;
-    const jPrev = (j - 1 + n) % n;
-
-    // n_right: normal of edge (j → j+1)
-    const erx = points[jNext].x - points[j].x;
-    const ery = points[jNext].y - points[j].y;
-    const erLen = Math.sqrt(erx * erx + ery * ery);
-    if (erLen < 0.0001) continue;
-    const nrx = -ery / erLen, nry = erx / erLen;
-
-    // n_left: normal of edge (j-1 → j)
-    const elx = points[j].x - points[jPrev].x;
-    const ely = points[j].y - points[jPrev].y;
-    const elLen = Math.sqrt(elx * elx + ely * ely);
-    if (elLen < 0.0001) continue;
-    const nlx = -ely / elLen, nly = elx / elLen;
-
-    // rhs: [known_right · n_right, known_left · n_left]
-    // known_right = cur (delta of j+1), known_left = fwdEndDelta (forward chain endpoint)
-    const r1 = cur.x * nrx + cur.y * nry;
-    const r2 = fwdEndDelta.x * nlx + fwdEndDelta.y * nly;
-
-    // Solve [[nrx, nry], [nlx, nly]] * [dx, dy] = [r1, r2]
-    const det = nrx * nly - nry * nlx;
-    if (Math.abs(det) < 0.0001) continue;
-    cur = {
-      x: (r1 * nly - r2 * nry) / det,
-      y: (nrx * r2 - nlx * r1) / det,
-    };
-    newPoints[j] = { x: points[j].x + cur.x, y: points[j].y + cur.y };
-  }
+  // New position for B: slide along adjacent edge B→nextNextPt
+  const nextNextPt = points[(edgeIdx + 2) % n];
+  const newB = lineIntersect(
+    A.x + delta.x, A.y + delta.y, dx, dy,
+    nextNextPt.x, nextNextPt.y, nextNextPt.x - B.x, nextNextPt.y - B.y
+  );
+  newPoints[(edgeIdx + 1) % n] = newB ?? { x: B.x + delta.x, y: B.y + delta.y };
 
   return newPoints;
 };
