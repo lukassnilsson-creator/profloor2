@@ -133,6 +133,8 @@ const Canvas: React.FC<CanvasProps> = ({
   const toolPanelDragRef = useRef<ToolPanelDragState | null>(null);
   const backgroundImageRef = useRef<HTMLImageElement | null>(null);
   const pointsRef = useRef(points);
+  const planksRef = useRef(planks);
+  const wastePiecesRef = useRef(wastePieces);
   const isPinchingRef = useRef(false);
   const [backgroundImageVersion, setBackgroundImageVersion] = useState(0);
   const [hoverPlank, setHoverPlank] = useState<PlankInstance | null>(null);
@@ -145,6 +147,13 @@ const Canvas: React.FC<CanvasProps> = ({
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [toolPanelOffset, setToolPanelOffset] = useState(loadToolPanelOffset);
   const [showGrid, setShowGrid] = useState(false);
+  const [showPlanks, setShowPlanks] = useState(true);
+  const [selectedPlankId, setSelectedPlankId] = useState<string | null>(null);
+  const setSelectedPlankIdRef = useRef(setSelectedPlankId);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [infoPanelOffset, setInfoPanelOffset] = useState({ x: 0, y: 0 });
+  const infoPanelDragRef = useRef<{ startClientX: number; startClientY: number; startOffsetX: number; startOffsetY: number } | null>(null);
+  useEffect(() => { setInfoPanelOffset({ x: 0, y: 0 }); }, [selectedPlankId]);
 
   // Kährs palette
   const factoryColor = { r: 210, g: 183, b: 172 };
@@ -155,7 +164,9 @@ const Canvas: React.FC<CanvasProps> = ({
     offsetRef.current = offset;
   }, [scale, offset]);
 
-  useEffect(() => { pointsRef.current = points; }, [points]);
+  useEffect(() => { pointsRef.current = points; setSelectedPlankId(null); }, [points]);
+  useEffect(() => { planksRef.current = planks; }, [planks]);
+  useEffect(() => { wastePiecesRef.current = wastePieces; }, [wastePieces]);
 
   useEffect(() => {
     if (!backgroundDrawing?.src) {
@@ -273,6 +284,15 @@ const Canvas: React.FC<CanvasProps> = ({
       });
     }
 
+    if (selectedPlankId) {
+      ids.add(selectedPlankId);
+      const sel = planks.find((p) => p.id === selectedPlankId);
+      if (sel?.sourcePlankId) ids.add(sel.sourcePlankId);
+      planks.forEach((plank) => {
+        if (plank.sourcePlankId === selectedPlankId) ids.add(plank.id);
+      });
+    }
+
     if (hoverWastePieceIdx !== null) {
       const sourceId = wastePieces[hoverWastePieceIdx]?.sourcePlankId;
       if (sourceId) {
@@ -283,7 +303,7 @@ const Canvas: React.FC<CanvasProps> = ({
       }
     }
     return ids;
-  }, [hoverPlank, hoverWastePieceIdx, planks, wastePieces]);
+  }, [hoverPlank, hoverWastePieceIdx, planks, selectedPlankId, wastePieces]);
 
   const highlightedWastePieceIndices = useMemo(() => {
     const indices = new Set<number>();
@@ -312,6 +332,7 @@ const Canvas: React.FC<CanvasProps> = ({
   }, [hoverPlank, hoverWastePieceIdx, wastePieces]);
 
   const hoverWastePiece = hoverWastePieceIdx !== null ? wastePieces[hoverWastePieceIdx] : null;
+  const selectedPlank = selectedPlankId ? planks.find((p) => p.id === selectedPlankId) ?? null : null;
 
   const getAngleAtVertex = (idx: number, pts: Point[]) => {
     if (pts.length < 3) return { angle: 0, labelPos: { x: 0, y: 0 } };
@@ -364,15 +385,61 @@ const Canvas: React.FC<CanvasProps> = ({
     const ny = edgeDx / edgeLength;
     const midX = (s1.x + s2.x) / 2;
     const midY = (s1.y + s2.y) / 2;
+    const offsetPx = 32;
 
-    // Place label on the outside of the polygon (side away from centroid)
-    const centX = points.reduce((sum, p) => sum + p.x * scale + centerX, 0) / points.length;
-    const centY = points.reduce((sum, p) => sum + p.y * scale + centerY, 0) / points.length;
-    const dot = nx * (centX - midX) + ny * (centY - midY);
-    const offsetPx = dot > 0 ? -32 : 32;
+    // Try positive normal direction first; check if that world-space point is inside
+    // the polygon — if so, flip to the other side (works correctly for concave rooms)
+    const worldMidX = (p1.x + p2.x) / 2;
+    const worldMidY = (p1.y + p2.y) / 2;
+    const worldNx = nx / scale;
+    const worldNy = ny / scale;
+    const candidate = { x: worldMidX + worldNx * offsetPx, y: worldMidY + worldNy * offsetPx };
+    const sign = (points.length >= 3 && isPointInPolygon(candidate, points)) ? -1 : 1;
 
-    return { left: midX + nx * offsetPx, top: midY + ny * offsetPx };
+    // Labels ending up to the left look visually closer due to text alignment — add 4px
+    const effectiveNx = nx * sign;
+    const extraOffset = effectiveNx < -0.1 ? 4 : 0;
+    const finalOffset = (offsetPx + extraOffset) * sign;
+
+    return { left: midX + nx * finalOffset, top: midY + ny * finalOffset };
   }, [offset.x, offset.y, points, scale]);
+
+  // Collision-based label visibility: compute all positions, then hide shorter edge labels
+  // that overlap with a longer edge label. Label bounding box ~52×20 px.
+  const visibleEdgeLabelIndices = useMemo(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || points.length < 2) return new Set<number>();
+
+    const LW = 56; // label width estimate
+    const LH = 20; // label height estimate
+
+    // Build positions for all edges (null = already hidden by min-length rule)
+    const positions: ({ left: number; top: number } | null)[] = points.map((_, i) =>
+      getEdgeLabelPosition(i)
+    );
+
+    // Sort edges longest-first; among ties keep original order
+    const order = points
+      .map((_, i) => ({ i, len: edgeLengths[i] ?? 0 }))
+      .sort((a, b) => b.len - a.len);
+
+    const visible = new Set<number>();
+    for (const { i } of order) {
+      const pos = positions[i];
+      if (!pos) continue; // below min-length threshold
+      // Check overlap with all already-visible labels
+      let overlaps = false;
+      for (const j of visible) {
+        const other = positions[j]!;
+        const dx = Math.abs(pos.left - other.left);
+        const dy = Math.abs(pos.top - other.top);
+        if (dx < LW && dy < LH) { overlaps = true; break; }
+      }
+      if (!overlaps) visible.add(i);
+    }
+    return visible;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [points, scale, offset.x, offset.y, edgeLengths, getEdgeLabelPosition]);
 
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
@@ -397,14 +464,13 @@ const Canvas: React.FC<CanvasProps> = ({
       if (image) {
         ctx.save();
         ctx.translate(centerX, centerY);
+        const dx = backgroundDrawing.x * scale;
+        const dy = backgroundDrawing.y * scale;
+        const dw = backgroundDrawing.width * scale;
+        const dh = backgroundDrawing.height * scale;
         ctx.globalAlpha = Math.max(0, Math.min(1, backgroundOpacity));
-        ctx.drawImage(
-          image,
-          backgroundDrawing.x * scale,
-          backgroundDrawing.y * scale,
-          backgroundDrawing.width * scale,
-          backgroundDrawing.height * scale
-        );
+        ctx.globalCompositeOperation = 'darken';
+        ctx.drawImage(image, dx, dy, dw, dh);
         ctx.restore();
       }
     }
@@ -428,11 +494,11 @@ const Canvas: React.FC<CanvasProps> = ({
     ctx.save();
     ctx.translate(centerX, centerY);
 
-    if (points.length >= 3) {
+    if (points.length >= 3 && showPlanks) {
       wastePieces.forEach((piece, index) => {
         const isHighlighted = highlightedWastePieceIndices.has(index);
-        ctx.fillStyle = isHighlighted ? 'rgba(209, 179, 166, 0.4)' : 'rgba(229, 219, 213, 0.26)';
-        ctx.strokeStyle = isHighlighted ? 'rgba(155, 118, 103, 0.6)' : 'rgba(178, 155, 145, 0.32)';
+        ctx.fillStyle = isHighlighted ? 'rgba(220, 60, 40, 0.28)' : 'rgba(220, 60, 40, 0.13)';
+        ctx.strokeStyle = isHighlighted ? 'rgba(180, 30, 20, 0.55)' : 'rgba(200, 60, 40, 0.28)';
         ctx.lineWidth = isHighlighted ? 1.2 : 0.8;
         ctx.fillRect(piece.x * scale, piece.y * scale, piece.w * scale, piece.h * scale);
         ctx.strokeRect(piece.x * scale, piece.y * scale, piece.w * scale, piece.h * scale);
@@ -451,15 +517,20 @@ const Canvas: React.FC<CanvasProps> = ({
         const isHighlighted = highlightedPlankIds.has(plank.id);
         const isFullLength = !plank.isCut;
 
+        // Pre-composite against canvas background (#FCFBFA = 252,251,250) to match
+        // the old look when planks had alpha — same visual result but fully opaque.
+        const BG_R = 252, BG_G = 251, BG_B = 250;
         if (isHighlighted) {
-          ctx.fillStyle = hoverPlank?.id === plank.id ? '#C9A89A' : 'rgba(201, 168, 154, 0.74)';
+          ctx.fillStyle = (hoverPlank?.id === plank.id || selectedPlankId === plank.id) ? '#C9A89A' : '#C0A094';
         } else if (isFullLength) {
-          ctx.fillStyle = `rgba(${factoryColor.r}, ${factoryColor.g}, ${factoryColor.b}, ${0.45 + contrast * 0.45})`;
+          const a = 0.45 + contrast * 0.45;
+          ctx.fillStyle = `rgb(${Math.round(a*factoryColor.r+(1-a)*BG_R)},${Math.round(a*factoryColor.g+(1-a)*BG_G)},${Math.round(a*factoryColor.b+(1-a)*BG_B)})`;
         } else {
-          const r = factoryColor.r + (cutColorBase.r - factoryColor.r) * contrast;
-          const g = factoryColor.g + (cutColorBase.g - factoryColor.g) * contrast;
-          const b = factoryColor.b + (cutColorBase.b - factoryColor.b) * contrast;
-          ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${0.38 - contrast * 0.14})`;
+          const pr = factoryColor.r + (cutColorBase.r - factoryColor.r) * contrast;
+          const pg = factoryColor.g + (cutColorBase.g - factoryColor.g) * contrast;
+          const pb = factoryColor.b + (cutColorBase.b - factoryColor.b) * contrast;
+          const a = 0.38 - contrast * 0.14;
+          ctx.fillStyle = `rgb(${Math.round(a*pr+(1-a)*BG_R)},${Math.round(a*pg+(1-a)*BG_G)},${Math.round(a*pb+(1-a)*BG_B)})`;
         }
 
         ctx.fillRect(plank.x * scale, plank.y * scale, plank.w * scale, plank.h * scale);
@@ -531,8 +602,10 @@ const Canvas: React.FC<CanvasProps> = ({
     points,
     scale,
     settings,
+    selectedPlankId,
     showBackgroundDrawing,
     showGrid,
+    showPlanks,
     wastePieces
   ]);
 
@@ -839,12 +912,29 @@ const Canvas: React.FC<CanvasProps> = ({
     };
 
     const handleTouchEnd = (event: TouchEvent) => {
+      const wasShortTap = longPressTimer !== null;
       if (longPressTimer !== null) { clearTimeout(longPressTimer); longPressTimer = null; }
+      const touchPos = longPressTouchStart;
       longPressTouchStart = null;
       if (event.touches.length < 2) {
         pinchDistance = null;
         // Small delay before clearing isPinching so the pointer-up handler doesn't misfire
         setTimeout(() => { isPinchingRef.current = false; }, 50);
+      }
+      // Short tap on touch device: detect plank selection
+      if (wasShortTap && touchPos && !isPinchingRef.current) {
+        const cursor = getCursorFromClientPosition(touchPos.x, touchPos.y);
+        if (cursor) {
+          const currentPlanks = planksRef.current;
+          let tappedPlank: PlankInstance | null = null;
+          for (const plank of currentPlanks) {
+            if (cursor.x >= plank.x && cursor.x <= plank.x + plank.w && cursor.y >= plank.y && cursor.y <= plank.y + plank.h) {
+              tappedPlank = plank;
+              break;
+            }
+          }
+          setSelectedPlankIdRef.current(tappedPlank ? tappedPlank.id : null);
+        }
       }
     };
 
@@ -937,7 +1027,7 @@ const Canvas: React.FC<CanvasProps> = ({
 
       {showEdgeLengths && points.length >= 2 && points.map((point, index) => {
         const labelPosition = getEdgeLabelPosition(index);
-        if (!labelPosition) return null;
+        if (!labelPosition || !visibleEdgeLabelIndices.has(index)) return null;
         return (
           <div
             key={index}
@@ -945,12 +1035,13 @@ const Canvas: React.FC<CanvasProps> = ({
             style={{ left: labelPosition.left, top: labelPosition.top }}
           >
             <div className="flex items-baseline gap-[2px]">
-              {disableEdgeEditing ? (
+              {/* Edge length input disabled — editing an edge length is complex (which point moves?)
+              {disableEdgeEditing ? ( */}
                 <span
                   className="h-6 w-10 pr-0 text-right text-[10px] font-semibold text-[#1A1A1A] leading-6 select-none"
                   style={{ textShadow: '0 0 4px rgba(255,255,255,0.95), 0 0 8px rgba(255,255,255,0.7)' }}
                 >{Math.round(edgeLengths[index])}</span>
-              ) : (
+              {/* ) : (
                 <input
                   type="number"
                   value={Math.round(edgeLengths[index])}
@@ -964,31 +1055,76 @@ const Canvas: React.FC<CanvasProps> = ({
                   className="h-6 w-10 border-none bg-transparent pr-0 text-right text-[10px] font-semibold text-[#1A1A1A] outline-none focus:bg-white/80 focus:rounded-sm focus:outline focus:outline-1 focus:outline-[#B69181] [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                   style={{ textShadow: '0 0 4px rgba(255,255,255,0.95), 0 0 8px rgba(255,255,255,0.7)' }}
                 />
-              )}
+              )} */}
               <span className="select-none text-[9px] font-medium text-[#1A1A1A]" style={{ textShadow: '0 0 4px rgba(255,255,255,0.95), 0 0 8px rgba(255,255,255,0.7)' }}>mm</span>
             </div>
           </div>
         );
       })}
 
+      {/* Mobile: selected plank info panel */}
+      {isTouchDevice && selectedPlank && (
+        <div
+          className="pointer-events-auto absolute bottom-20 left-1/2 z-40 -translate-x-1/2 touch-none select-none rounded-2xl border border-[#D9D4CF] bg-white px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.13)]"
+          style={{ transform: `translate(calc(-50% + ${infoPanelOffset.x}px), ${infoPanelOffset.y}px)` }}
+          onPointerDown={(e) => {
+            if ((e.target as HTMLElement).closest('button')) return;
+            e.currentTarget.setPointerCapture(e.pointerId);
+            infoPanelDragRef.current = { startClientX: e.clientX, startClientY: e.clientY, startOffsetX: infoPanelOffset.x, startOffsetY: infoPanelOffset.y };
+          }}
+          onPointerMove={(e) => {
+            if (!infoPanelDragRef.current) return;
+            setInfoPanelOffset({
+              x: infoPanelDragRef.current.startOffsetX + e.clientX - infoPanelDragRef.current.startClientX,
+              y: infoPanelDragRef.current.startOffsetY + e.clientY - infoPanelDragRef.current.startClientY,
+            });
+          }}
+          onPointerUp={() => { infoPanelDragRef.current = null; }}
+        >
+          <div className="flex cursor-grab items-center gap-4 active:cursor-grabbing">
+            <div className="text-center">
+              <div className="text-[9px] font-medium text-[#9A9A9A]">Längd</div>
+              <div className="text-[13px] font-bold text-[#1A1A1A]">{Math.round(selectedPlank.w)} mm</div>
+            </div>
+            <div className="h-8 w-px bg-[#EAE6E3]" />
+            <div className="text-center">
+              <div className="text-[9px] font-medium text-[#9A9A9A]">Bredd</div>
+              <div className="text-[13px] font-bold text-[#1A1A1A]">{Math.round(selectedPlank.h)} mm</div>
+            </div>
+            <div className="h-8 w-px bg-[#EAE6E3]" />
+            <div className="text-center">
+              <div className="text-[9px] font-medium text-[#9A9A9A]">Typ</div>
+              <div className="text-[11px] font-semibold text-[#8F6655]">{selectedPlank.isCut ? 'Kapad' : 'Fabriksmått'}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setSelectedPlankId(null)}
+              className="ml-2 flex h-6 w-6 items-center justify-center rounded-full text-[#9A9A9A] hover:bg-[#F3F0ED]"
+              aria-label="Stäng"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M6 18L18 6M6 6l12 12" /></svg>
+            </button>
+          </div>
+        </div>
+      )}
+
       {(hoverPlank || hoverWastePiece) && (
         <div
           className="pointer-events-none fixed z-50 border border-[#DDD8D4] bg-white p-3 text-[10px] font-medium shadow-xl"
           style={{ left: mousePos.x + 15, top: mousePos.y + 15 }}
         >
-          {hoverPlank && (
+          {hoverWastePiece ? (
+            <>
+              <div className="mb-1 text-[#5F5F5F]">Spillbit</div>
+              <div className="text-[#8F6655]">{Math.round(hoverWastePiece.w)} × {Math.round(hoverWastePiece.h)} mm</div>
+            </>
+          ) : hoverPlank ? (
             <>
               <div className="text-[#5F5F5F]">Längd: {Math.round(hoverPlank.w)} mm</div>
               <div className="mb-1 text-[#5F5F5F]">Bredd: {Math.round(hoverPlank.h)} mm</div>
               <div className="text-[#8F6655]">{!hoverPlank.isCut ? 'Fabriksmått' : 'Anpassad'}</div>
             </>
-          )}
-          {!hoverPlank && hoverWastePiece && (
-            <>
-              <div className="mb-1 text-[#5F5F5F]">Spillbit</div>
-              <div className="text-[#8F6655]">{Math.round(hoverWastePiece.w)} × {Math.round(hoverWastePiece.h)} mm</div>
-            </>
-          )}
+          ) : null}
         </div>
       )}
 
@@ -1100,6 +1236,16 @@ const Canvas: React.FC<CanvasProps> = ({
               <div className="px-1.5 py-0.5">
                 <button
                   type="button"
+                  onClick={() => { setShowPlanks((prev) => !prev); setContextMenu(null); }}
+                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
+                >
+                  {showPlanks ? 'Dölj brädor' : 'Visa brädor'}
+                </button>
+              </div>
+
+              <div className="px-1.5 py-0.5">
+                <button
+                  type="button"
                   onClick={() => { setSettings({ ...settings, visualContrast: settings.visualContrast > 0 ? 0 : 0.3 }); setContextMenu(null); }}
                   className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
                 >
@@ -1111,7 +1257,7 @@ const Canvas: React.FC<CanvasProps> = ({
                 <button
                   type="button"
                   disabled={!backgroundDrawing}
-                  onClick={() => { if (!backgroundDrawing) return; onBackgroundOpacityChange(backgroundOpacity > 0 ? 0 : 0.15); setContextMenu(null); }}
+                  onClick={() => { if (!backgroundDrawing) return; onBackgroundOpacityChange(backgroundOpacity > 0 ? 0 : 0.4); setContextMenu(null); }}
                   className={`pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium transition-colors ${
                     !backgroundDrawing ? 'cursor-not-allowed text-[#B0B0B0]' : 'text-[#333333] hover:bg-[#f0f0f0]'
                   }`}
@@ -1146,6 +1292,63 @@ const Canvas: React.FC<CanvasProps> = ({
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* Mobile hamburger FAB — shown only on touch devices */}
+      {isTouchDevice && (
+        <div className="pointer-events-auto absolute bottom-6 right-6 z-40">
+          {mobileMenuOpen && (
+            <div
+              className="absolute bottom-14 right-0 w-[168px] rounded-2xl border border-[#aaaaaa] bg-white py-1.5 shadow-[0_4px_24px_rgba(0,0,0,0.15)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="px-1.5 py-0.5">
+                <button type="button" onClick={() => { onToggleEdgeLengths(); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors">
+                  {showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
+                </button>
+              </div>
+              <div className="px-1.5 py-0.5">
+                <button type="button" onClick={() => { setShowPlanks((prev) => !prev); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors">
+                  {showPlanks ? 'Dölj brädor' : 'Visa brädor'}
+                </button>
+              </div>
+              <div className="px-1.5 py-0.5">
+                <button type="button" onClick={() => { setSettings({ ...settings, visualContrast: settings.visualContrast > 0 ? 0 : 0.3 }); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors">
+                  {settings.visualContrast > 0 ? 'Kontrast av' : 'Kontrast på'}
+                </button>
+              </div>
+              <div className="px-1.5 py-0.5">
+                <button type="button" disabled={!backgroundDrawing} onClick={() => { if (!backgroundDrawing) return; onBackgroundOpacityChange(backgroundOpacity > 0 ? 0 : 0.4); setMobileMenuOpen(false); }} className={`pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium transition-colors ${!backgroundDrawing ? 'cursor-not-allowed text-[#B0B0B0]' : 'text-[#333333] hover:bg-[#f0f0f0]'}`}>
+                  {backgroundDrawing && backgroundOpacity > 0 ? 'Dölj ritning' : 'Visa ritning'}
+                </button>
+              </div>
+              <div className="px-1.5 py-0.5">
+                <button type="button" onClick={() => { setShowGrid((prev) => !prev); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors">
+                  {showGrid ? 'Dölj stödraster' : 'Visa stödraster'}
+                </button>
+              </div>
+              <div className="my-1 border-t border-[#ECE7E3]" />
+              <div className="px-1.5 py-0.5">
+                <button type="button" onClick={() => { onResetDesign?.(); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#C41230] hover:bg-[#fff0f1] transition-colors flex items-center gap-1.5">
+                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" /></svg>
+                  <span>Återställ design</span>
+                </button>
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen((prev) => !prev)}
+            aria-label="Meny"
+            className="flex h-12 w-12 items-center justify-center rounded-full bg-white border border-[#aaaaaa] shadow-[0_2px_12px_rgba(0,0,0,0.18)] text-[#333333] transition-colors hover:bg-[#F3F0ED] active:bg-[#EAE6E3]"
+          >
+            {mobileMenuOpen ? (
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 18L18 6M6 6l12 12" /></svg>
+            ) : (
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
+            )}
+          </button>
         </div>
       )}
 

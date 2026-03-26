@@ -19,7 +19,6 @@ interface SidebarProps {
   onAddProduct: (product: SavedProduct, targetDesignId: string) => void;
   onRemoveProduct: (productId: string) => void;
   onSelectProduct: (product: SavedProduct) => void;
-  onOptimize: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -38,7 +37,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   onAddProduct,
   onRemoveProduct,
   onSelectProduct,
-  onOptimize
 }) => {
   const [productUrl, setProductUrl] = useState('');
   const [isFetching, setIsFetching] = useState(false);
@@ -47,7 +45,6 @@ const Sidebar: React.FC<SidebarProps> = ({
   const fetchTimerRef = useRef<number | null>(null);
   const scrollRevealTimeoutRef = useRef<number | null>(null);
   const [isSidebarScrolling, setIsSidebarScrolling] = useState(false);
-  const [isJusteraOpen, setIsJusteraOpen] = useState(false);
   const [expandedProductIds, setExpandedProductIds] = useState<Set<string>>(new Set());
   const toggleProductExpanded = (id: string) => {
     setExpandedProductIds((prev) => {
@@ -56,7 +53,6 @@ const Sidebar: React.FC<SidebarProps> = ({
       return next;
     });
   };
-  const justeraRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     return () => {
@@ -65,17 +61,6 @@ const Sidebar: React.FC<SidebarProps> = ({
       }
     };
   }, []);
-
-  useEffect(() => {
-    if (!isJusteraOpen) return;
-    const handleOutsideClick = (e: MouseEvent) => {
-      if (justeraRef.current && !justeraRef.current.contains(e.target as Node)) {
-        setIsJusteraOpen(false);
-      }
-    };
-    document.addEventListener('mousedown', handleOutsideClick);
-    return () => document.removeEventListener('mousedown', handleOutsideClick);
-  }, [isJusteraOpen]);
 
   const handleSidebarScroll = () => {
     setIsSidebarScrolling(true);
@@ -551,130 +536,6 @@ const Sidebar: React.FC<SidebarProps> = ({
       </div>
     </div>
 
-    {/* Justera läggning accordion + sticky bottom bar */}
-    <div ref={justeraRef} className="flex-shrink-0 relative">
-      {/* Accordion panel — floats 14px above the button */}
-      {isJusteraOpen && (() => {
-        const maxOffset = Math.max(0, settings.length - settings.minEndPiece);
-        const maxVerticalOffset = Math.max(0, settings.width);
-        const maxMinPiece = Math.max(0, settings.length / 2);
-        return (
-          <div className="absolute left-5 bottom-[57px] w-[200px] bg-white rounded-2xl px-4 py-4 border border-[#aaaaaa] space-y-3">
-            <div className="space-y-2.5">
-              <div>
-                <div className="mb-0.5 flex items-center justify-between">
-                  <label className="text-[9px] font-medium text-[#767676]">Skarvförskjutning</label>
-                  <span className="text-[10px] font-semibold text-[#333333]">{Math.round(settings.minStagger)} mm</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max={Math.max(0, settings.length)}
-                  step="10"
-                  value={settings.minStagger}
-                  onChange={(event) => {
-                    const next = Math.max(0, parseInt(event.target.value, 10) || 0);
-                    setSettings({ ...settings, minStagger: next });
-                  }}
-                  className="kahrs-slider"
-                />
-              </div>
-              <div>
-                <div className="mb-0.5 flex items-center justify-between">
-                  <label className="text-[9px] font-medium text-[#767676]">Startförskjutning hor.</label>
-                  <span className="text-[10px] font-semibold text-[#333333]">{Math.round(settings.startOffset)} mm</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max={maxOffset}
-                  step="10"
-                  value={settings.startOffset}
-                  onChange={(event) => {
-                    const next = Math.max(0, parseInt(event.target.value, 10) || 0);
-                    setSettings({ ...settings, startOffset: Math.min(next, maxOffset) });
-                  }}
-                  className="kahrs-slider"
-                />
-              </div>
-              <div>
-                <div className="mb-0.5 flex items-center justify-between">
-                  <label className="text-[9px] font-medium text-[#767676]">Startförskjutning vert.</label>
-                  <span className="text-[10px] font-semibold text-[#333333]">{Math.round(settings.startOffsetVertical)} mm</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max={maxVerticalOffset}
-                  step="10"
-                  value={settings.startOffsetVertical}
-                  onChange={(event) => {
-                    const next = Math.max(0, parseInt(event.target.value, 10) || 0);
-                    setSettings({ ...settings, startOffsetVertical: Math.min(next, maxVerticalOffset) });
-                  }}
-                  className="kahrs-slider"
-                />
-              </div>
-              <div>
-                <div className="mb-0.5 flex items-center justify-between">
-                  <label className="text-[9px] font-medium text-[#767676]">Minsta ändbit</label>
-                  <span className="text-[10px] font-semibold text-[#333333]">{Math.round(settings.minEndPiece)} mm</span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max={maxMinPiece}
-                  step="10"
-                  value={settings.minEndPiece}
-                  onChange={(event) => {
-                    const next = Math.max(0, parseInt(event.target.value, 10) || 0);
-                    setSettings({ ...settings, minEndPiece: Math.min(next, maxMinPiece) });
-                  }}
-                  className="kahrs-slider"
-                />
-              </div>
-            </div>
-          </div>
-        );
-      })()}
-      {/* Sticky bottom bar */}
-      <div className="border-t border-[#d9d9d9] px-5 py-4 flex items-center gap-2 bg-white">
-        <button
-          type="button"
-          onClick={() => setIsJusteraOpen((v) => !v)}
-          className="pf-action-heading h-8 w-[149px] px-3 rounded-full bg-white text-[10px] font-semibold text-[#333333] transition-colors hover:bg-[#f0f0f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] flex items-center gap-1.5"
-          aria-expanded={isJusteraOpen}
-        >
-          <img src="/icons/kugghjul-v01.svg" width="19" height="19" alt="" aria-hidden="true" style={{display:'block',flexShrink:0}} />
-          <span className="leading-none">Justera läggning</span>
-        </button>
-        <button
-          type="button"
-          onClick={onOptimize}
-          className="pf-action-heading h-8 w-[149px] px-3 rounded-full bg-white text-[10px] font-semibold text-[#333333] transition-colors hover:bg-[#f0f0f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] flex items-center gap-1.5"
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{display:'block',flexShrink:0}} aria-hidden="true">
-            <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-            <path d="M18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
-          </svg>
-          <span className="leading-none">Optimera läggning</span>
-        </button>
-        <button
-          type="button"
-          onClick={() => setSettings({ ...settings, layoutRotated: !settings.layoutRotated })}
-          title={settings.layoutRotated ? 'Rotera 90° tillbaka' : 'Rotera 90°'}
-          className="ml-auto flex h-[38px] w-[38px] flex-shrink-0 items-center justify-center rounded-full bg-white transition-colors hover:bg-[#f0f0f0]"
-          aria-label={settings.layoutRotated ? 'Rotera 90° tillbaka' : 'Rotera 90°'}
-        >
-          <svg width="19" height="18" viewBox="0 0 26 24" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{display:'block'}}>
-            <rect x="1" y="1" width="5" height="14" rx="1" stroke={settings.layoutRotated ? '#333333' : '#CCCCCC'} />
-            <rect x="8" y="13" width="14" height="5" rx="1" stroke={settings.layoutRotated ? '#CCCCCC' : '#333333'} />
-            <path d="M7 4 C14 2, 18 5, 18 11.5" stroke="#CCCCCC" />
-            <polyline points="15.5,10 18,11.5 16.5,14" stroke="#CCCCCC" />
-          </svg>
-        </button>
-      </div>
-    </div>
     </div>
   );
 };

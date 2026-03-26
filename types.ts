@@ -117,7 +117,9 @@ export interface ReferenceWall {
 }
 
 export interface ImportedDrawingBackground {
-  src: string;
+  src: string;            // Cropped image (base64)
+  originalSrc?: string;   // Full original image before crop (for re-editing)
+  cropRect?: { x: number; y: number; width: number; height: number }; // Crop in natural px
   x: number;
   y: number;
   width: number;

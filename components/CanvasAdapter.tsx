@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import Canvas from './Canvas';
+import ImportWizard from './ImportWizard';
 import { calculateLayout } from '../flooringEngine';
 import { getPolygonArea, getBoundingBox } from '../geometry';
-import { Point, PlankSettings, Stats, ProductInfo } from '../types';
+import { Point, PlankSettings, Stats, ProductInfo, ImportedDrawingBackground } from '../types';
 
 const MIN_SCALE = 0.005;
 
@@ -93,9 +94,11 @@ export default function CanvasAdapter({
   const [showEdgeLengths, setShowEdgeLengths] = useState(true);
   const [gridSize] = useState(100);
   const [snapToGrid, setSnapToGrid] = useState(false);
-  const [backgroundDrawing, setBackgroundDrawing] = useState<any>(null);
+  const [backgroundDrawing, setBackgroundDrawing] = useState<ImportedDrawingBackground | null>(null);
   const [showBackgroundDrawing, setShowBackgroundDrawing] = useState(false);
-  const [backgroundOpacity, setBackgroundOpacity] = useState(0.15);
+  const [backgroundOpacity, setBackgroundOpacity] = useState(0.4);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
   const [isJusteraOpen, setIsJusteraOpen] = useState(false);
   const [undoStack, setUndoStack] = useState<Point[][]>([]);
@@ -200,18 +203,25 @@ export default function CanvasAdapter({
 
   const handleImportFile = useCallback((file: File | undefined) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const src = e.target?.result as string;
-      const img = new Image();
-      img.onload = () => {
-        setBackgroundDrawing({ src, x: 0, y: 0, width: img.naturalWidth, height: img.naturalHeight });
-        setShowBackgroundDrawing(true);
-      };
-      img.src = src;
-    };
-    reader.readAsDataURL(file);
+    setImportFile(file);
+    setIsImporting(true);
   }, []);
+
+  const handleImportComplete = useCallback((bg: ImportedDrawingBackground) => {
+    // Center background on existing room bounding box
+    const xs = points.map((p: Point) => p.x), ys = points.map((p: Point) => p.y);
+    const roomCx = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const roomCy = (Math.min(...ys) + Math.max(...ys)) / 2;
+    const centeredBg: ImportedDrawingBackground = {
+      ...bg,
+      x: roomCx - bg.width / 2,
+      y: roomCy - bg.height / 2,
+    };
+    setBackgroundDrawing(centeredBg);
+    setShowBackgroundDrawing(true);
+    setIsImporting(false);
+    setImportFile(null);
+  }, [points]);
 
   const handleShare = useCallback(() => {
     navigator.clipboard.writeText(window.location.href).then(() => {
@@ -297,6 +307,7 @@ export default function CanvasAdapter({
   const BOTTOM_BAR_H = 56;
 
   return (
+    <>
     <div
       ref={containerRef}
       style={{ width: '100%' }}
@@ -416,12 +427,15 @@ export default function CanvasAdapter({
           />
           <button
             type="button"
-            onClick={() => importInputRef.current?.click()}
+            onClick={() => {
+              if (backgroundDrawing) { setIsImporting(true); }
+              else { importInputRef.current?.click(); }
+            }}
             className="hidden sm:flex h-8 px-3 rounded-full bg-white border border-[#DAD6D2] shadow-sm items-center gap-1.5 text-[11px] font-medium hover:bg-[#f5f5f5] transition-colors"
-            aria-label="Importera ritning"
+            aria-label={backgroundDrawing ? 'Justera ritning' : 'Importera ritning'}
           >
             <svg width="13" height="13" fill="none" stroke="currentColor" strokeWidth="1.8" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            <span className="hidden sm:inline">Importera ritning</span>
+            <span className="hidden sm:inline">{backgroundDrawing ? 'Justera ritning' : 'Importera ritning'}</span>
           </button>
           <button
             type="button"
@@ -519,6 +533,17 @@ export default function CanvasAdapter({
           stats={stats}
           productInfo={productInfo ?? null}
         />
+
+        {/* Import wizard — contained within canvas area */}
+        {isImporting && (
+          <ImportWizard
+            initialFile={importFile}
+            existingBackground={backgroundDrawing}
+            onComplete={handleImportComplete}
+            onCancel={() => { setIsImporting(false); setImportFile(null); }}
+            contained={true}
+          />
+        )}
       </div>
 
       {/* ── Bottom bar ── */}
@@ -604,6 +629,8 @@ export default function CanvasAdapter({
 
       </div>
     </div>
+
+    </>
   );
 }
 

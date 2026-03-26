@@ -43,7 +43,7 @@ const MAX_ZOOM_PERCENT = 500;
 const MAX_DESIGNS = 3;
 const MAX_DESIGN_NAME_LENGTH = 25;
 const DESIGN_LIMIT_MESSAGE = 'max 3 golvdesigner samtidigt.';
-const DEFAULT_BACKGROUND_OPACITY = 0.1;
+const DEFAULT_BACKGROUND_OPACITY = 0.4;
 const UNDO_HISTORY_LIMIT = 20;
 
 const FLOOR_DESIGNS_STORAGE_KEY = 'profloor.floor-designs';
@@ -499,6 +499,7 @@ const App: React.FC = () => {
   const [gridSize, setGridSize] = useState(100);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isAdjusting, setIsAdjusting] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [editingDesignId, setEditingDesignId] = useState<string | null>(null);
   const [editingDesignName, setEditingDesignName] = useState('');
@@ -1703,18 +1704,42 @@ const App: React.FC = () => {
     handleZoomExtentsForDesign(activeDesign.id, targetPoints);
   };
 
-  const handleImportComplete = (newPoints: Point[], importedBackground: ImportedDrawingBackground | null) => {
+  const handleImportComplete = (importedBackground: ImportedDrawingBackground) => {
     const currentDesignId = activeDesign.id;
     recordActiveHistory();
+
+    // Center the background on the bounding box of the existing room
+    const roomPts = activeDesign.points;
+    let centeredBg = importedBackground;
+    if (roomPts.length > 0) {
+      const xs = roomPts.map(p => p.x), ys = roomPts.map(p => p.y);
+      const roomCx = (Math.min(...xs) + Math.max(...xs)) / 2;
+      const roomCy = (Math.min(...ys) + Math.max(...ys)) / 2;
+      centeredBg = {
+        ...importedBackground,
+        x: roomCx - importedBackground.width / 2,
+        y: roomCy - importedBackground.height / 2,
+      };
+    }
+
     updateDesignById(currentDesignId, (design) => ({
       ...design,
-      points: newPoints,
-      backgroundDrawing: importedBackground ? { ...importedBackground } : design.backgroundDrawing,
-      showBackgroundDrawing: importedBackground ? true : design.showBackgroundDrawing
+      backgroundDrawing: { ...centeredBg },
+      showBackgroundDrawing: true,
     }));
     setIsImporting(false);
+    setIsAdjusting(false);
     setImportFile(null);
-    setTimeout(() => handleZoomExtentsForDesign(currentDesignId, newPoints), 100);
+
+    // Zoom to show the background
+    const bg = centeredBg;
+    const bgPoints: Point[] = [
+      { x: bg.x, y: bg.y },
+      { x: bg.x + bg.width, y: bg.y },
+      { x: bg.x + bg.width, y: bg.y + bg.height },
+      { x: bg.x, y: bg.y + bg.height },
+    ];
+    setTimeout(() => handleZoomExtentsForDesign(currentDesignId, bgPoints), 100);
   };
 
   const [showDesignLimitMessage, setShowDesignLimitMessage] = useState(false);
@@ -2097,7 +2122,6 @@ const App: React.FC = () => {
                 onAddProduct={addProduct}
                 onRemoveProduct={removeProduct}
                 onSelectProduct={activateProduct}
-                onOptimize={handleOptimizeLayout}
               />
             </div>
           )}
@@ -2326,9 +2350,8 @@ const App: React.FC = () => {
                 </button>
               </div>
 
-              {/* Mobile: top-left overlay — Optimera, Justera, Rotera */}
-              {isMobile && (
-                <div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between gap-1.5 pointer-events-none">
+              {/* Top-left overlay — Optimera, Justera, Rotera */}
+              <div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between gap-1.5 pointer-events-none">
                   <div className="flex items-center gap-1.5 pointer-events-auto">
                     {/* Optimera */}
                     <button
@@ -2416,14 +2439,8 @@ const App: React.FC = () => {
                       </svg>
                     </button>
                   </div>
-                  {/* Upload + Dela + Spara on mobile top-right */}
-                  <div className="flex items-center gap-1.5 pointer-events-auto">
-                    <button type="button" onClick={() => importInputRef.current?.click()}
-                      className="pf-action-heading flex h-8 items-center justify-center gap-1.5 rounded-full border border-[#d9d9d9] bg-white px-3 font-medium text-[#4a4a4a] shadow-sm hover:bg-[#f0f0f0] transition-colors"
-                      aria-label="Ladda ritning" title="Ladda ritning">
-                      <svg className="h-3.5 w-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 4v10m0 0l-4-4m4 4l4-4M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1" /></svg>
-                      <span className="whitespace-nowrap">Ladda ritning</span>
-                    </button>
+                  {/* Upload + Dela + Spara — mobile top-right only */}
+                  {isMobile && <div className="flex items-center gap-1.5 pointer-events-auto">
                     <button type="button" onClick={handleShare}
                       className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] shadow-sm hover:bg-[#f0f0f0] transition-colors"
                       aria-label="Dela" title="Dela">
@@ -2440,9 +2457,8 @@ const App: React.FC = () => {
                         : <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="17 21 17 13 7 13 7 21" /><polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="7 3 7 8 15 8" /></svg>
                       }
                     </button>
-                  </div>
+                  </div>}
                 </div>
-              )}
 
               {/* Right: import, save — desktop only */}
               <div className={`absolute right-3 top-3 z-30 flex items-center gap-2 ${isMobile ? 'hidden' : ''}`}>
@@ -2458,7 +2474,10 @@ const App: React.FC = () => {
                 />
                 <button
                   type="button"
-                  onClick={() => importInputRef.current?.click()}
+                  onClick={() => {
+                    if (activeDesign.backgroundDrawing) { setIsAdjusting(true); setIsImporting(true); }
+                    else { importInputRef.current?.click(); }
+                  }}
                   onDragEnter={(event) => {
                     event.preventDefault();
                     setIsImportDropActive(true);
@@ -2487,13 +2506,13 @@ const App: React.FC = () => {
                       ? 'border-[#C41230] bg-[#fff5f6]'
                       : 'border-[#d9d9d9] bg-white'
                   }`}
-                  aria-label="Ladda ritning"
-                  title="Ladda ritning"
+                  aria-label={activeDesign.backgroundDrawing ? 'Justera ritning' : 'Ladda ritning'}
+                  title={activeDesign.backgroundDrawing ? 'Justera ritning' : 'Ladda ritning'}
                 >
                   <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 4v10m0 0l-4-4m4 4l4-4M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1" />
                   </svg>
-                  <span className="whitespace-nowrap">Ladda ritning</span>
+                  <span className="whitespace-nowrap">{activeDesign.backgroundDrawing ? 'Justera ritning' : 'Ladda ritning'}</span>
                 </button>
                 <button
                   type="button"
@@ -2689,12 +2708,13 @@ const App: React.FC = () => {
         {isImporting && (
           <ImportWizard
             initialFile={importFile}
+            existingBackground={isAdjusting ? activeDesign.backgroundDrawing : null}
             onComplete={handleImportComplete}
             onCancel={() => {
               setIsImporting(false);
+              setIsAdjusting(false);
               setImportFile(null);
             }}
-            onAnalysisCancelled={() => logEvent('plan_cancelled', user?.id)}
           />
         )}
       </div>
