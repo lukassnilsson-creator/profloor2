@@ -9,6 +9,7 @@ interface UsePlanEditorOptions {
   snapToGrid: boolean;
   gridSize: number;
   interactionScale: number;
+  planLocked?: boolean;
 }
 
 interface PrimaryDownResult {
@@ -50,7 +51,8 @@ export const usePlanEditor = ({
   setPoints,
   snapToGrid,
   gridSize,
-  interactionScale
+  interactionScale,
+  planLocked = false
 }: UsePlanEditorOptions): UsePlanEditorResult => {
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
   const [closestEdgeIdx, setClosestEdgeIdx] = useState<number | null>(null);
@@ -75,7 +77,20 @@ export const usePlanEditor = ({
     }
   }, [points.length, draggingIdx, hoverIdx, closestEdgeIdx]);
 
+  useEffect(() => {
+    if (!planLocked) return;
+    setDraggingIdx(null);
+    setDraggingEdgeIdx(null);
+    setEdgeDragState(null);
+    setVertexDragStart(null);
+    setClosestEdgeIdx(null);
+  }, [planLocked]);
+
   const handlePrimaryDown = (cursor: Point): PrimaryDownResult => {
+    if (planLocked) {
+      return { startedDrag: false, insertedPoint: false };
+    }
+
     if (hoverIdx !== null) {
       setDraggingIdx(hoverIdx);
       setVertexDragStart(cursor);
@@ -103,6 +118,13 @@ export const usePlanEditor = ({
   const handleTouchDown = (cursor: Point): PrimaryDownResult => {
     // Points get a generous hit area (×3) — easy to tap corners with a finger
     const safePointScale = Math.max(MIN_SCALE, interactionScale);
+    if (planLocked) {
+      const immediateHoverIdx = getHoverPointIndex(points, cursor, safePointScale);
+      setHoverIdx(immediateHoverIdx);
+      setClosestEdgeIdx(null);
+      return { startedDrag: false, insertedPoint: false };
+    }
+
     // Edges use a tighter hit area (×1.5) to avoid accidental drags
     const safeEdgeScale = Math.max(MIN_SCALE, interactionScale * 2);
 
@@ -131,6 +153,14 @@ export const usePlanEditor = ({
   };
 
   const handlePointerMove = (cursor: Point) => {
+    if (planLocked) {
+      const scale = Math.max(MIN_SCALE, interactionScale);
+      const nextHoverIdx = getHoverPointIndex(points, cursor, scale);
+      setHoverIdx(nextHoverIdx);
+      setClosestEdgeIdx(null);
+      return { hoverIdx: nextHoverIdx, isDragging: false };
+    }
+
     if (draggingIdx !== null) {
       let constrainedCursor = cursor;
       if (vertexDragStart !== null) {

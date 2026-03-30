@@ -64,6 +64,7 @@ export interface FloorDesign {
   name: string;
   savedFloorId?: string;    // Supabase saved_floors row ID, set after first save
   savedStateKey?: string;   // JSON snapshot of key state at last save, used to detect unsaved changes
+  isLocked: boolean;
   points: Point[];
   settings: PlankSettings;
   products: SavedProduct[]; // Per-design product list (max 5)
