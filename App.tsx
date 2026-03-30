@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar';
 import Canvas from './components/Canvas';
 import MobileProductPanel from './components/MobileProductPanel';
 import ImportWizard from './components/ImportWizard';
+import CanvasOverlayControls from './components/CanvasOverlayControls';
 import {
   Point,
   PlankSettings,
@@ -44,6 +45,7 @@ const MAX_DESIGNS = 3;
 const MAX_DESIGN_NAME_LENGTH = 25;
 const DESIGN_LIMIT_MESSAGE = 'max 3 golvdesigner samtidigt.';
 const DEFAULT_BACKGROUND_OPACITY = 0.4;
+const ENABLED_VISUAL_CONTRAST = 0.6;
 const UNDO_HISTORY_LIMIT = 20;
 
 const FLOOR_DESIGNS_STORAGE_KEY = 'profloor.floor-designs';
@@ -174,8 +176,8 @@ const DEFAULT_FLOOR_POINTS: Point[] = [
   { x: -2000, y: 1500 }
 ];
 
-const getDesignStateKey = (design: Pick<FloorDesign, 'points' | 'settings' | 'activeProductId' | 'productSettingsById' | 'products'>): string =>
-  JSON.stringify({ points: design.points, settings: design.settings, activeProductId: design.activeProductId, productSettingsById: design.productSettingsById, products: design.products });
+const getDesignStateKey = (design: Pick<FloorDesign, 'points' | 'settings' | 'activeProductId' | 'productSettingsById' | 'products' | 'isLocked'>): string =>
+  JSON.stringify({ points: design.points, settings: design.settings, activeProductId: design.activeProductId, productSettingsById: design.productSettingsById, products: design.products, isLocked: design.isLocked });
 
 const DEFAULT_STATE_KEY = getDesignStateKey({
   points: DEFAULT_FLOOR_POINTS,
@@ -183,6 +185,7 @@ const DEFAULT_STATE_KEY = getDesignStateKey({
   activeProductId: null,
   productSettingsById: {},
   products: [],
+  isLocked: false,
 });
 
 const isDesignDirty = (design: FloorDesign): boolean => {
@@ -195,6 +198,7 @@ const isDesignDirty = (design: FloorDesign): boolean => {
 const createDefaultDesign = (name: string): FloorDesign => ({
   id: createDesignId(),
   name,
+  isLocked: false,
   points: DEFAULT_FLOOR_POINTS.map((p) => ({ ...p })),
   settings: { ...INITIAL_SETTINGS },
   products: [],
@@ -439,6 +443,7 @@ const parseFloorDesign = (item: unknown, index: number): FloorDesign | null => {
   return {
     id,
     name,
+    isLocked: item.isLocked === true,
     points,
     settings: sanitizePlankSettings(item.settings),
     products,
@@ -539,8 +544,6 @@ const App: React.FC = () => {
   const anonymousFloorLoggedRef = useRef(false);
   const [isManualActive, setIsManualActive] = useState(false);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 640);
-  const [isMobileJusteraOpen, setIsMobileJusteraOpen] = useState(false);
-  const mobileJusteraRef = useRef<HTMLDivElement | null>(null);
   const [manualFloorSettings, setManualFloorSettings] = useState({
     length: INITIAL_SETTINGS.length,
     width: INITIAL_SETTINGS.width,
@@ -584,6 +587,7 @@ const App: React.FC = () => {
           backgroundDrawing?: ImportedDrawingBackground | null;
           showBackgroundDrawing?: boolean;
           backgroundOpacity?: number;
+          isLocked?: boolean;
         };
         const restoredProducts = (payload.products ?? payload.savedProducts ?? [])
           .map(parseSavedProduct).filter((p): p is SavedProduct => p !== null).slice(0, 5);
@@ -601,6 +605,7 @@ const App: React.FC = () => {
                   ...(payload.backgroundDrawing !== undefined ? { backgroundDrawing: payload.backgroundDrawing } : {}),
                   ...(payload.showBackgroundDrawing !== undefined ? { showBackgroundDrawing: payload.showBackgroundDrawing } : {}),
                   ...(payload.backgroundOpacity !== undefined ? { backgroundOpacity: payload.backgroundOpacity } : {}),
+                  ...(payload.isLocked !== undefined ? { isLocked: payload.isLocked === true } : {}),
                   products: restoredProducts,
                 }
               : d
@@ -625,6 +630,7 @@ const App: React.FC = () => {
         savedProducts?: SavedProduct[]; // legacy
         activeProductId?: string | null;
         productSettingsById?: Record<string, ProductDesignSettings>;
+        isLocked?: boolean;
       };
       const restoredProducts = (payload.products ?? payload.savedProducts ?? [])
         .map(parseSavedProduct).filter((p): p is SavedProduct => p !== null).slice(0, 5);
@@ -639,6 +645,7 @@ const App: React.FC = () => {
                 ...(payload.settings ? { settings: payload.settings } : {}),
                 ...(payload.activeProductId !== undefined ? { activeProductId: payload.activeProductId } : {}),
                 ...(payload.productSettingsById ? { productSettingsById: payload.productSettingsById } : {}),
+                ...(payload.isLocked !== undefined ? { isLocked: payload.isLocked === true } : {}),
                 products: restoredProducts,
               }
             : d
@@ -774,18 +781,6 @@ const App: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [designState.activeDesignId]);
 
-  // Close mobile Justera panel on outside tap/click
-  useEffect(() => {
-    if (!isMobileJusteraOpen) return;
-    const handle = (e: MouseEvent | TouchEvent) => {
-      if (mobileJusteraRef.current && !mobileJusteraRef.current.contains(e.target as Node)) {
-        setIsMobileJusteraOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', handle);
-    return () => document.removeEventListener('pointerdown', handle);
-  }, [isMobileJusteraOpen]);
-
   // Track viewport width for responsive sidebar behaviour
   useEffect(() => {
     const handleResize = () => {
@@ -811,6 +806,7 @@ const App: React.FC = () => {
     }
     const payload = {
       name: activeDesign.name,
+      isLocked: activeDesign.isLocked,
       points,
       settings,
       products: activeDesign.products,
@@ -831,7 +827,7 @@ const App: React.FC = () => {
       url = `${window.location.origin}${window.location.pathname}?shared=${data.id}`;
     } catch {
       // Fallback: use URL hash with minimal payload (no background — too large for URL)
-      const minimalPayload = { name: activeDesign.name, points, settings, products: activeDesign.products, activeProductId, productSettingsById: activeDesign.productSettingsById };
+      const minimalPayload = { name: activeDesign.name, isLocked: activeDesign.isLocked, points, settings, products: activeDesign.products, activeProductId, productSettingsById: activeDesign.productSettingsById };
       const encoded = encodeSharePayload(minimalPayload);
       url = `${window.location.origin}${window.location.pathname}#s=${encoded}`;
       window.location.hash = `s=${encoded}`;
@@ -941,6 +937,7 @@ const App: React.FC = () => {
   const buildSavePayload = (design: FloorDesign, compressedBackground: ImportedDrawingBackground | null | undefined, currentStats?: Stats, thumbnail?: string) => {
     const activeProduct = design.products.find((p) => p.id === design.activeProductId) ?? null;
     return {
+      isLocked: design.isLocked,
       points: design.points,
       settings: design.settings,
       products: design.products,
@@ -1069,6 +1066,7 @@ const App: React.FC = () => {
       backgroundDrawing?: ImportedDrawingBackground | null;
       showBackgroundDrawing?: boolean;
       backgroundOpacity?: number;
+      isLocked?: boolean;
     };
 
     // Restore products: new format first, then legacy fallbacks
@@ -1090,6 +1088,7 @@ const App: React.FC = () => {
       settings: newSettings,
       activeProductId: newActiveProductId,
       productSettingsById: newProductSettingsById,
+      isLocked: payload.isLocked === true,
       products: restoredProducts,
     });
 
@@ -1891,6 +1890,24 @@ const App: React.FC = () => {
     setImportLaunchError('Filformat stöds inte. Välj PNG, JPG eller PDF.');
   };
 
+  const handleToggleVisualContrast = () => {
+    setActiveSettings({
+      ...settings,
+      visualContrast: settings.visualContrast > 0 ? 0 : ENABLED_VISUAL_CONTRAST
+    });
+  };
+
+  const handleToggleDesignLock = () => {
+    updateActiveDesign((design) => ({ ...design, isLocked: !design.isLocked }));
+  };
+
+  const handleToggleLayoutRotation = () => {
+    setActiveSettings({
+      ...settings,
+      layoutRotated: !settings.layoutRotated
+    });
+  };
+
 
   const contentColumns = isMobile
     ? 'grid-cols-[minmax(0,1fr)]'
@@ -1898,6 +1915,7 @@ const App: React.FC = () => {
   const topbarColumns = isMobile
     ? 'grid-cols-[52px_minmax(0,1fr)]'
     : 'grid-cols-[var(--pf-topbar-sidebar-w)_minmax(0,1fr)_0px]';
+  const mobileCanvasHeight = 510;
 
   return (
     <div className="w-full overflow-hidden bg-[#f5f5f5]" style={{ height: '100dvh' }}>
@@ -2014,14 +2032,19 @@ const App: React.FC = () => {
                             </>
                           ) : (
                             <span
-                              className="truncate"
+                              className="flex items-center gap-1.5 truncate"
                               title={displayName}
                               onDoubleClick={(event) => {
                                 event.stopPropagation();
                                 beginDesignNameEdit(design, index);
                               }}
                             >
-                              {displayName}
+                              <span className="truncate">{displayName}</span>
+                              {design.isLocked && (
+                                <svg className="h-3.5 w-3.5 shrink-0 text-[#8a8a8a]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 10V7a4 4 0 118 0v3m-9 0h10a1 1 0 011 1v8a1 1 0 01-1 1H7a1 1 0 01-1-1v-8a1 1 0 011-1z" />
+                                </svg>
+                              )}
                             </span>
                           )}
                           {isActive && (
@@ -2316,260 +2339,89 @@ const App: React.FC = () => {
               );
             })()}
 
-            <div className={`relative ${isMobile ? 'h-[310px] flex-none' : 'h-full'} min-h-0 min-w-0`}>
-              {/* Right side: vertical zoom controls, centered */}
-              <div className="absolute right-3 z-30 flex flex-col items-center gap-1.5" style={isMobile ? { top: 'calc(44px + (310px - 44px) / 2 - 20px)', transform: 'translateY(-50%)' } : { top: 'calc(50% - 60px)', transform: 'translateY(-50%)' }}>
-                <button
-                  type="button"
-                  onClick={() => handleZoomStep(1)}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[18px] leading-none text-[#767676] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a]"
-                  title="Zooma in"
-                  aria-label="Zooma in"
-                >
-                  +
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleZoomExtents()}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#767676] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
-                  title="Visa hela"
-                  aria-label="Visa hela"
-                >
-                  <svg className="h-3.5 w-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M4 10.5l8-6 8 6M6.5 9.75V19.5a1 1 0 001 1h9a1 1 0 001-1V9.75M10 20v-5a1 1 0 011-1h2a1 1 0 011 1v5" />
-                  </svg>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleZoomStep(-1)}
-                  className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[18px] leading-none text-[#767676] shadow-[0_2px_8px_rgba(0,0,0,0.07)] transition-colors hover:bg-[#f0f0f0] hover:text-[#1a1a1a]"
-                  title="Zooma ut"
-                  aria-label="Zooma ut"
-                >
-                  −
-                </button>
-              </div>
+            <div
+              className={`relative ${isMobile ? 'flex-none' : 'h-full'} min-h-0 min-w-0`}
+              style={isMobile ? { height: `${mobileCanvasHeight}px` } : undefined}
+            >
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
+                className="hidden"
+                onChange={(event) => {
+                  handleCanvasImportFile(event.target.files?.[0]);
+                  event.currentTarget.value = '';
+                }}
+              />
 
-              {/* Top-left overlay — Optimera, Justera, Rotera */}
-              <div className="absolute top-3 left-3 right-3 z-30 flex items-center justify-between gap-1.5 pointer-events-none">
-                  <div className="flex items-center gap-1.5 pointer-events-auto">
-                    {/* Optimera */}
-                    <button
-                      type="button"
-                      onClick={handleOptimizeLayout}
-                      className="h-8 px-3 rounded-full bg-white border border-[#d9d9d9] shadow-sm flex items-center gap-1.5 text-[11px] font-medium hover:bg-[#f0f0f0] transition-colors"
-                      title="Optimera läggning för minst spill"
-                    >
-                      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <path d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z" />
-                        <path d="M18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456z" />
-                      </svg>
-                      Optimera
-                    </button>
-                    {/* Justera */}
-                    <div ref={mobileJusteraRef} className="relative">
-                      <button
-                        type="button"
-                        onClick={() => setIsMobileJusteraOpen(v => !v)}
-                        className="h-8 px-3 rounded-full bg-white border border-[#d9d9d9] shadow-sm flex items-center gap-1.5 text-[11px] font-medium hover:bg-[#f0f0f0] transition-colors"
-                        aria-expanded={isMobileJusteraOpen}
-                        aria-haspopup="true"
-                      >
-                        <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                      </button>
-                      {isMobileJusteraOpen && (
-                        <div className="absolute left-0 top-full mt-2 w-[210px] bg-white rounded-2xl border border-[#aaaaaa] shadow-[0_4px_20px_rgba(0,0,0,0.12)] px-4 py-4 space-y-3 z-50">
-                          <div className="text-[10px] font-semibold text-[#777] uppercase tracking-wider mb-1">Justera läggning</div>
-                          <div>
-                            <div className="mb-0.5 flex items-center justify-between">
-                              <label className="text-[9px] font-medium text-[#767676]">Skarvförskjutning</label>
-                              <span className="text-[10px] font-semibold text-[#333]">{Math.round(settings.minStagger)} mm</span>
-                            </div>
-                            <input type="range" min="0" max={Math.max(0, settings.length)} step="10"
-                              value={settings.minStagger}
-                              onChange={e => setActiveSettings({ ...settings, minStagger: Math.max(0, parseInt(e.target.value) || 0) })}
-                              className="kahrs-slider w-full" />
-                          </div>
-                          <div>
-                            <div className="mb-0.5 flex items-center justify-between">
-                              <label className="text-[9px] font-medium text-[#767676]">Startförskjutning hor.</label>
-                              <span className="text-[10px] font-semibold text-[#333]">{Math.round(settings.startOffset)} mm</span>
-                            </div>
-                            <input type="range" min="0" max={mobileMaxOffset} step="10"
-                              value={settings.startOffset}
-                              onChange={e => setActiveSettings({ ...settings, startOffset: Math.min(parseInt(e.target.value) || 0, mobileMaxOffset) })}
-                              className="kahrs-slider w-full" />
-                          </div>
-                          <div>
-                            <div className="mb-0.5 flex items-center justify-between">
-                              <label className="text-[9px] font-medium text-[#767676]">Startförskjutning vert.</label>
-                              <span className="text-[10px] font-semibold text-[#333]">{Math.round(settings.startOffsetVertical)} mm</span>
-                            </div>
-                            <input type="range" min="0" max={mobileMaxVerticalOffset} step="10"
-                              value={settings.startOffsetVertical}
-                              onChange={e => setActiveSettings({ ...settings, startOffsetVertical: Math.min(parseInt(e.target.value) || 0, mobileMaxVerticalOffset) })}
-                              className="kahrs-slider w-full" />
-                          </div>
-                          <div>
-                            <div className="mb-0.5 flex items-center justify-between">
-                              <label className="text-[9px] font-medium text-[#767676]">Minsta ändbit</label>
-                              <span className="text-[10px] font-semibold text-[#333]">{Math.round(settings.minEndPiece)} mm</span>
-                            </div>
-                            <input type="range" min="0" max={mobileMaxMinPiece} step="10"
-                              value={settings.minEndPiece}
-                              onChange={e => setActiveSettings({ ...settings, minEndPiece: Math.min(parseInt(e.target.value) || 0, mobileMaxMinPiece) })}
-                              className="kahrs-slider w-full" />
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                    {/* Rotera */}
-                    <button
-                      type="button"
-                      onClick={() => setActiveSettings({ ...settings, layoutRotated: !settings.layoutRotated })}
-                      className="h-8 w-8 rounded-full bg-white border border-[#d9d9d9] shadow-sm flex items-center justify-center hover:bg-[#f0f0f0] transition-colors"
-                      aria-label="Rotera layout 90°"
-                      title={settings.layoutRotated ? 'Rotera 90° tillbaka' : 'Rotera 90°'}
-                    >
-                      <svg width="19" height="18" viewBox="0 0 26 24" fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                        <rect x="1" y="1" width="5" height="14" rx="1" stroke={settings.layoutRotated ? '#333333' : '#CCCCCC'} />
-                        <rect x="8" y="13" width="14" height="5" rx="1" stroke={settings.layoutRotated ? '#CCCCCC' : '#333333'} />
-                        <path d="M7 4 C14 2, 18 5, 18 11.5" stroke="#CCCCCC" />
-                        <polyline points="15.5,10 18,11.5 16.5,14" stroke="#CCCCCC" />
-                      </svg>
-                    </button>
-                  </div>
-                  {/* Upload + Dela + Spara — mobile top-right only */}
-                  {isMobile && <div className="flex items-center gap-1.5 pointer-events-auto">
-                    <button type="button" onClick={handleShare}
-                      className="flex h-8 w-8 items-center justify-center rounded-full border border-[#d9d9d9] bg-white text-[#4a4a4a] shadow-sm hover:bg-[#f0f0f0] transition-colors"
-                      aria-label="Dela" title="Dela">
-                      {shareCopied
-                        ? <svg className="h-3.5 w-3.5 text-[#3D8B37]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M5 13l4 4L19 7" /></svg>
-                        : <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" /></svg>
-                      }
-                    </button>
-                    <button type="button" onClick={handleSave} disabled={!user || isSaving}
-                      className={`flex h-8 w-8 items-center justify-center rounded-full border shadow-sm transition-colors ${user && !isSaving ? saveDone ? 'border-[#b8ddb5] bg-[#f0fbef] text-[#3D8B37]' : 'border-[#d9d9d9] bg-white text-[#4a4a4a] hover:bg-[#f0f0f0]' : 'border-[#e8e8e8] bg-white text-[#c0c0c0] opacity-50 cursor-not-allowed'}`}
-                      aria-label="Spara" title={user ? 'Spara' : 'Logga in för att spara'}>
-                      {saveDone
-                        ? <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M5 13l4 4L19 7" /></svg>
-                        : <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" /><polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="17 21 17 13 7 13 7 21" /><polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="7 3 7 8 15 8" /></svg>
-                      }
-                    </button>
-                  </div>}
-                </div>
-
-              {/* Right: import, save — desktop only */}
-              <div className={`absolute right-3 top-3 z-30 flex items-center gap-2 ${isMobile ? 'hidden' : ''}`}>
-                <input
-                  ref={importInputRef}
-                  type="file"
-                  accept=".png,.jpg,.jpeg,.pdf,image/png,image/jpeg,application/pdf"
-                  className="hidden"
-                  onChange={(event) => {
-                    handleCanvasImportFile(event.target.files?.[0]);
-                    event.currentTarget.value = '';
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (activeDesign.backgroundDrawing) { setIsAdjusting(true); setIsImporting(true); }
-                    else { importInputRef.current?.click(); }
-                  }}
-                  onDragEnter={(event) => {
-                    event.preventDefault();
+              <CanvasOverlayControls
+                importLabel={activeDesign.backgroundDrawing ? 'Justera ritning' : 'Importera ritning'}
+                importError={importLaunchError}
+                importDropActive={isImportDropActive}
+                onImportClick={() => {
+                  if (activeDesign.backgroundDrawing) {
+                    setIsAdjusting(true);
+                    setIsImporting(true);
+                    return;
+                  }
+                  importInputRef.current?.click();
+                }}
+                onImportDragEnter={(event) => {
+                  event.preventDefault();
+                  setIsImportDropActive(true);
+                }}
+                onImportDragOver={(event) => {
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'copy';
+                  if (!isImportDropActive) {
                     setIsImportDropActive(true);
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = 'copy';
-                    if (!isImportDropActive) {
-                      setIsImportDropActive(true);
-                    }
-                  }}
-                  onDragLeave={(event) => {
-                    event.preventDefault();
-                    const relatedTarget = event.relatedTarget as Node | null;
-                    if (!event.currentTarget.contains(relatedTarget)) {
-                      setIsImportDropActive(false);
-                    }
-                  }}
-                  onDrop={(event) => {
-                    event.preventDefault();
+                  }
+                }}
+                onImportDragLeave={(event) => {
+                  event.preventDefault();
+                  const relatedTarget = event.relatedTarget as Node | null;
+                  if (!event.currentTarget.contains(relatedTarget)) {
                     setIsImportDropActive(false);
-                    handleCanvasImportFile(event.dataTransfer.files?.[0]);
-                  }}
-                  className={`pf-action-heading flex h-8 items-center justify-center gap-1.5 rounded-full border px-3 font-medium text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] ${
-                    isImportDropActive
-                      ? 'border-[#C41230] bg-[#fff5f6]'
-                      : 'border-[#d9d9d9] bg-white'
-                  }`}
-                  aria-label={activeDesign.backgroundDrawing ? 'Justera ritning' : 'Ladda ritning'}
-                  title={activeDesign.backgroundDrawing ? 'Justera ritning' : 'Ladda ritning'}
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M12 4v10m0 0l-4-4m4 4l4-4M4 17v1a2 2 0 002 2h12a2 2 0 002-2v-1" />
-                  </svg>
-                  <span className="whitespace-nowrap">{activeDesign.backgroundDrawing ? 'Justera ritning' : 'Ladda ritning'}</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleShare}
-                  title="Dela golvdesign"
-                  aria-label="Dela golvdesign"
-                  className="pf-action-heading flex h-8 items-center justify-center gap-1.5 rounded-full border border-[#d9d9d9] bg-white px-3 font-medium text-[#4a4a4a] transition-colors hover:text-[#1a1a1a] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230]"
-                >
-                  {shareCopied ? (
-                    <svg className="h-3.5 w-3.5 text-[#3D8B37]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
-                    </svg>
-                  )}
-                  <span className="whitespace-nowrap" style={{ color: shareCopied ? '#3D8B37' : undefined }}>
-                    {shareCopied ? 'Kopierat!' : 'Dela'}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={!user || isSaving}
-                  title={user ? 'Spara golvdesign' : 'Logga in för att spara'}
-                  aria-label="Spara"
-                  className={`pf-action-heading flex h-8 items-center justify-center gap-1.5 rounded-full border px-3 font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#C41230] ${
-                    user && !isSaving
-                      ? saveDone
-                        ? 'border-[#b8ddb5] bg-[#f0fbef] text-[#3D8B37]'
-                        : 'border-[#d9d9d9] bg-white text-[#4a4a4a] hover:text-[#1a1a1a]'
-                      : 'border-[#e8e8e8] bg-white text-[#c0c0c0] cursor-not-allowed opacity-50'
-                  }`}
-                >
-                  {saveDone ? (
-                    <svg className="h-3.5 w-3.5 text-[#3D8B37]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M5 13l4 4L19 7" />
-                    </svg>
-                  ) : (
-                    <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z" />
-                      <polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="17 21 17 13 7 13 7 21" />
-                      <polyline strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" points="7 3 7 8 15 8" />
-                    </svg>
-                  )}
-                  <span className="whitespace-nowrap" style={{ color: saveDone ? '#3D8B37' : undefined }}>
-                    {isSaving ? 'Sparar…' : saveDone ? 'Sparat!' : 'Spara'}
-                  </span>
-                </button>
-              </div>
-
-              {importLaunchError && (
-                <div className="absolute right-3 top-[3.35rem] z-30 max-w-[280px] border border-[#fad0d5] bg-[#fff5f6] px-2.5 py-1.5 text-[10px] font-semibold text-[#C41230]">
-                  {importLaunchError}
-                </div>
-              )}
+                  }
+                }}
+                onImportDrop={(event) => {
+                  event.preventDefault();
+                  setIsImportDropActive(false);
+                  handleCanvasImportFile(event.dataTransfer.files?.[0]);
+                }}
+                drawingAvailable={Boolean(activeDesign.backgroundDrawing)}
+                drawingVisible={Boolean(activeDesign.backgroundDrawing && showBackgroundDrawing)}
+                onToggleDrawing={handleToggleBackgroundDrawing}
+                contrastEnabled={settings.visualContrast > 0}
+                onToggleContrast={handleToggleVisualContrast}
+                isLocked={activeDesign.isLocked}
+                onToggleLock={handleToggleDesignLock}
+                shareCopied={shareCopied}
+                onShareClick={handleShare}
+                saveLabel={isSaving ? 'Sparar…' : saveDone ? 'Sparat!' : 'Spara'}
+                saveTitle={user ? 'Spara golvdesign' : 'Logga in för att spara'}
+                saveDisabled={!user || isSaving}
+                saveDone={saveDone}
+                onSaveClick={handleSave}
+                onZoomIn={() => handleZoomStep(1)}
+                onZoomExtents={() => handleZoomExtents()}
+                onZoomOut={() => handleZoomStep(-1)}
+                onOptimize={handleOptimizeLayout}
+                onRotate={handleToggleLayoutRotation}
+                isRotated={settings.layoutRotated}
+                minStagger={settings.minStagger}
+                maxStagger={Math.max(0, settings.length)}
+                startOffset={settings.startOffset}
+                maxOffset={mobileMaxOffset}
+                startOffsetVertical={settings.startOffsetVertical}
+                maxVerticalOffset={mobileMaxVerticalOffset}
+                minEndPiece={settings.minEndPiece}
+                maxMinPiece={mobileMaxMinPiece}
+                onMinStaggerChange={(value) => setActiveSettings({ ...settings, minStagger: Math.max(0, value) })}
+                onStartOffsetChange={(value) => setActiveSettings({ ...settings, startOffset: Math.min(Math.max(0, value), mobileMaxOffset) })}
+                onStartOffsetVerticalChange={(value) => setActiveSettings({ ...settings, startOffsetVertical: Math.min(Math.max(0, value), mobileMaxVerticalOffset) })}
+                onMinEndPieceChange={(value) => setActiveSettings({ ...settings, minEndPiece: Math.min(Math.max(0, value), mobileMaxMinPiece) })}
+              />
 
               <Canvas
                 points={points}
@@ -2597,6 +2449,7 @@ const App: React.FC = () => {
                 onZoomExtents={handleZoomExtents}
                 onResetDesign={handleReset}
                 showFloatingToolPanel={false}
+                planLocked={activeDesign.isLocked}
                 stats={stats}
                 productInfo={productInfo}
               />

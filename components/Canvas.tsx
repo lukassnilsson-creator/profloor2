@@ -31,6 +31,7 @@ interface CanvasProps {
   onResetDesign?: () => void;
   showFloatingToolPanel?: boolean;
   disableEdgeEditing?: boolean;
+  planLocked?: boolean;
   stats: Stats;
   productInfo: ProductInfo | null;
 }
@@ -120,6 +121,7 @@ const Canvas: React.FC<CanvasProps> = ({
   onResetDesign,
   showFloatingToolPanel = true,
   disableEdgeEditing = false,
+  planLocked = false,
   stats,
   productInfo
 }) => {
@@ -198,6 +200,12 @@ const Canvas: React.FC<CanvasProps> = ({
     return () => window.removeEventListener('click', closeMenu);
   }, [contextMenu]);
 
+  useEffect(() => {
+    if (planLocked && contextMenu?.kind === 'edge') {
+      setContextMenu(null);
+    }
+  }, [contextMenu, planLocked]);
+
   const clampToolPanelOffset = useCallback((candidate: { x: number; y: number }) => {
     const container = containerRef.current;
     const panel = toolPanelRef.current;
@@ -266,7 +274,8 @@ const Canvas: React.FC<CanvasProps> = ({
     setPoints,
     snapToGrid,
     gridSize,
-    interactionScale: isTouchDevice ? scale / 3 : scale
+    interactionScale: isTouchDevice ? scale / 3 : scale,
+    planLocked
   });
 
   const edgeLengths = useMemo(() => {
@@ -632,6 +641,18 @@ const Canvas: React.FC<CanvasProps> = ({
     const my = (event.clientY - rect.top - canvas.height / 2 - offset.y) / scale;
     const cursor = { x: mx, y: my };
 
+    if (planLocked) {
+      const pointScale = Math.max(0.0001, event.pointerType !== 'mouse' ? scale / 3 : scale);
+      const lockedPointIdx = getHoverPointIndex(points, cursor, pointScale);
+      if (lockedPointIdx !== null) {
+        if (settings.originPointIdx !== lockedPointIdx) {
+          onRequestHistorySnapshot();
+          setSettings({ ...settings, originPointIdx: lockedPointIdx });
+        }
+        return;
+      }
+    }
+
     // Touch: compute hover state inline (no prior hover phase on touch)
     // Mouse: rely on existing hoverIdx/closestEdgeIdx set by pointermove
     const result = event.pointerType !== 'mouse'
@@ -707,7 +728,7 @@ const Canvas: React.FC<CanvasProps> = ({
   };
 
   const handleDeletePoint = (idx: number) => {
-    if (points.length <= 3) {
+    if (planLocked || points.length <= 3) {
       setContextMenu(null);
       return;
     }
@@ -847,7 +868,7 @@ const Canvas: React.FC<CanvasProps> = ({
         if (now - lastTapTime < 300 && Math.hypot(touch.clientX - lastTapPos.x, touch.clientY - lastTapPos.y) < 30) {
           lastTapTime = 0;
           const cursor = getCursorFromClientPosition(touch.clientX, touch.clientY);
-          if (cursor) {
+          if (cursor && !planLocked) {
             const currentScale = scaleRef.current;
             const tapHoverIdx = getHoverPointIndex(pointsRef.current, cursor, currentScale / 3);
             if (tapHoverIdx !== null) {
@@ -875,7 +896,7 @@ const Canvas: React.FC<CanvasProps> = ({
             setContextMenu({ kind: 'point', x: lx, y: ly, pointIdx });
             return;
           }
-          if (pts.length >= 3) {
+          if (!planLocked && pts.length >= 3) {
             const safeScale = Math.max(currentScale, 0.0001);
             const edgeIdx = getClosestEdgeInsertIndex(pts, cursor, safeScale / 3, null);
             if (edgeIdx !== null) {
@@ -974,7 +995,7 @@ const Canvas: React.FC<CanvasProps> = ({
           return;
         }
 
-        if (points.length >= 3) {
+        if (!planLocked && points.length >= 3) {
           const safeScale = Math.max(currentScale, 0.0001);
           const edgeIdx = getClosestEdgeInsertIndex(points, cursor, safeScale, null);
           if (edgeIdx !== null) {
@@ -1010,7 +1031,7 @@ const Canvas: React.FC<CanvasProps> = ({
           setIsPanning(false);
         }}
         onDoubleClick={() => {
-          if (hoverIdx !== null) {
+          if (!planLocked && hoverIdx !== null) {
             const snapped = forceSnapPointTo90(points, hoverIdx);
             if (snapped !== points) setPoints(snapped);
           }
@@ -1209,7 +1230,7 @@ const Canvas: React.FC<CanvasProps> = ({
                   Välj som start
                 </button>
               </div>
-              {points.length > 3 && (
+              {!planLocked && points.length > 3 && (
                 <div className="px-1.5 py-0.5">
                   <button
                     type="button"
@@ -1276,20 +1297,24 @@ const Canvas: React.FC<CanvasProps> = ({
                 </button>
               </div>
 
-              <div className="my-1 border-t border-[#ECE7E3]" />
+              {!planLocked && (
+                <>
+                  <div className="my-1 border-t border-[#ECE7E3]" />
 
-              <div className="px-1.5 py-0.5">
-                <button
-                  type="button"
-                  onClick={() => { onResetDesign?.(); setContextMenu(null); }}
-                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#C41230] hover:bg-[#fff0f1] transition-colors flex items-center gap-1.5"
-                >
-                  <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" />
-                  </svg>
-                  <span>Återställ design</span>
-                </button>
-              </div>
+                  <div className="px-1.5 py-0.5">
+                    <button
+                      type="button"
+                      onClick={() => { onResetDesign?.(); setContextMenu(null); }}
+                      className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#C41230] hover:bg-[#fff0f1] transition-colors flex items-center gap-1.5"
+                    >
+                      <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" />
+                      </svg>
+                      <span>Återställ design</span>
+                    </button>
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
@@ -1328,13 +1353,17 @@ const Canvas: React.FC<CanvasProps> = ({
                   {showGrid ? 'Dölj stödraster' : 'Visa stödraster'}
                 </button>
               </div>
-              <div className="my-1 border-t border-[#ECE7E3]" />
-              <div className="px-1.5 py-0.5">
-                <button type="button" onClick={() => { onResetDesign?.(); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#C41230] hover:bg-[#fff0f1] transition-colors flex items-center gap-1.5">
-                  <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" /></svg>
-                  <span>Återställ design</span>
-                </button>
-              </div>
+              {!planLocked && (
+                <>
+                  <div className="my-1 border-t border-[#ECE7E3]" />
+                  <div className="px-1.5 py-0.5">
+                    <button type="button" onClick={() => { onResetDesign?.(); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#C41230] hover:bg-[#fff0f1] transition-colors flex items-center gap-1.5">
+                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" /></svg>
+                      <span>Återställ design</span>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
           )}
           <button

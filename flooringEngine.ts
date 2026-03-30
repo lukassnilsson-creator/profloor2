@@ -55,12 +55,318 @@ export const calculateLayout = (
       ? (((settings.startOffsetVertical || 0) % rowHeight) + rowHeight) % rowHeight
       : 0;
 
+  interface PreparedSegment {
+    start: number;
+    end: number;
+  }
+
+  interface PreparedRow {
+    rowIdx: number;
+    actualRowTop: number;
+    actualRowHeight: number;
+    segments: PreparedSegment[];
+  }
+
+  interface CarryPlacement {
+    x: number;
+    y: number;
+    h: number;
+  }
+
+  interface LayoutFlowState {
+    carryOverOffcut: number;
+    carryOverSourceId?: string;
+    carryOverOffcutPlacement: CarryPlacement | null;
+    lastRowJoints: number[];
+    rowBeforeLastJoints: number[];
+    alignmentBaseX: number;
+  }
+
+  interface TwoZoneOpeningPattern {
+    splitAnchors: { rowIdx: number; leftZoneEnd: number; rightZoneStart: number }[];
+    tolerance: number;
+  }
+
+  const createFlowState = (initialOffcut: number, alignmentBaseX: number): LayoutFlowState => ({
+    carryOverOffcut: initialOffcut,
+    carryOverSourceId: undefined,
+    carryOverOffcutPlacement: null,
+    lastRowJoints: [],
+    rowBeforeLastJoints: [],
+    alignmentBaseX
+  });
+
+  const clonePlacement = (placement: CarryPlacement | null): CarryPlacement | null =>
+    placement ? { ...placement } : null;
+
+  const commitRowState = (state: LayoutFlowState, currentRowJoints: number[]) => {
+    state.rowBeforeLastJoints = state.lastRowJoints;
+    state.lastRowJoints = currentRowJoints;
+  };
+
+  const detectTwoZoneOpeningPattern = (rows: PreparedRow[]): TwoZoneOpeningPattern | null => {
+    if (rows.length < 2) return null;
+
+    const segmentCounts = rows.map((row) => row.segments.length);
+    if (segmentCounts.some((count) => count > 2)) return null;
+
+    const splitAnchors = rows
+      .filter((row) => row.segments.length === 2)
+      .map((row) => ({
+        rowIdx: row.rowIdx,
+        leftZoneEnd: row.segments[0].end,
+        rightZoneStart: row.segments[1].start
+      }));
+    if (splitAnchors.length === 0) return null;
+
+    const tolerance = Math.max(10, Math.min(25, rowHeight / 2));
+    const validSplitAnchors = splitAnchors.every((anchor) => anchor.leftZoneEnd < anchor.rightZoneStart - 1);
+    if (!validSplitAnchors) return null;
+
+    const interpolateBoundary = (
+      rowIdx: number,
+      key: 'leftZoneEnd' | 'rightZoneStart'
+    ): number => {
+      const exactAnchor = splitAnchors.find((anchor) => anchor.rowIdx === rowIdx);
+      if (exactAnchor) return exactAnchor[key];
+
+      let prevAnchor: typeof splitAnchors[number] | null = null;
+      let nextAnchor: typeof splitAnchors[number] | null = null;
+      for (const anchor of splitAnchors) {
+        if (anchor.rowIdx < rowIdx) {
+          prevAnchor = anchor;
+          continue;
+        }
+        if (anchor.rowIdx > rowIdx) {
+          nextAnchor = anchor;
+          break;
+        }
+      }
+
+      if (prevAnchor && nextAnchor) {
+        const progress = (rowIdx - prevAnchor.rowIdx) / (nextAnchor.rowIdx - prevAnchor.rowIdx);
+        return prevAnchor[key] + ((nextAnchor[key] - prevAnchor[key]) * progress);
+      }
+
+      return (prevAnchor ?? nextAnchor)![key];
+    };
+
+    const classifySingleSegment = (
+      rowIdx: number,
+      segment: PreparedSegment
+    ): 'left-only' | 'bridge' | 'right-only' | null => {
+      const leftZoneEnd = interpolateBoundary(rowIdx, 'leftZoneEnd');
+      const rightZoneStart = interpolateBoundary(rowIdx, 'rightZoneStart');
+      if (segment.end <= leftZoneEnd + tolerance) return 'left-only';
+      if (segment.start >= rightZoneStart - tolerance) return 'right-only';
+      if (segment.start <= leftZoneEnd + tolerance && segment.end >= rightZoneStart - tolerance) return 'bridge';
+      return null;
+    };
+
+    let bridgeRowCount = 0;
+    for (const row of rows) {
+      if (row.segments.length === 0) continue;
+      if (row.segments.length === 2) continue;
+      if (row.segments.length !== 1) return null;
+      const classification = classifySingleSegment(row.rowIdx, row.segments[0]);
+      if (!classification) return null;
+      if (classification === 'bridge') bridgeRowCount++;
+    }
+
+    if (bridgeRowCount === 0) return null;
+
+    return {
+      splitAnchors,
+      tolerance
+    };
+  };
+
   /**
    * Helper to perform layout with a specific vertical offset
    */
   const performLayout = (vOffset: number): LayoutResult => {
     const planks: PlankInstance[] = [];
     const wastePieces: WastePiece[] = [];
+    let totalPlanksOpened = (settings.startOffset > 0) ? 1 : 0;
+
+    const placeSegment = (
+      row: PreparedRow,
+      segment: PreparedSegment,
+      segmentLabel: string,
+      state: LayoutFlowState,
+      hasClashPrev?: (jointX: number) => boolean,
+      hasClashTwoRowsBack?: (jointX: number) => boolean
+    ): number[] => {
+      if (segment.end - segment.start <= 0.1) return [];
+
+      const pushStartSideWaste = (width: number, type: WastePiece['type'], sourcePlankId?: string) => {
+        if (width <= 0.5) return;
+        wastePieces.push({
+          x: segment.start - width,
+          y: row.actualRowTop,
+          w: width,
+          h: row.actualRowHeight,
+          type,
+          sourcePlankId
+        });
+      };
+
+      const clashPrev = hasClashPrev ?? ((jointX: number) =>
+        state.lastRowJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < settings.minStagger)
+      );
+      const clashTwoRowsBack = hasClashTwoRowsBack ?? ((jointX: number) =>
+        state.rowBeforeLastJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < (settings.minStagger / 2))
+      );
+
+      const validateConfig = (startLengthToTest: number) => {
+        if (startLengthToTest < settings.minEndPiece && Math.abs(startLengthToTest - fullPlankLength) > 0.1) {
+          return false;
+        }
+
+        let currentJoint = segment.start + startLengthToTest;
+        const testJoints: number[] = [];
+        if (currentJoint < segment.end - 0.1) testJoints.push(currentJoint);
+        while (currentJoint + fullPlankLength < segment.end - 0.1) {
+          currentJoint += fullPlankLength;
+          testJoints.push(currentJoint);
+        }
+
+        const finalPiece = segment.end - currentJoint;
+        if (finalPiece < settings.minEndPiece && finalPiece > 0.1) return false;
+        if (testJoints.some(clashPrev)) return false;
+        if (testJoints.some(clashTwoRowsBack)) return false;
+        return true;
+      };
+
+      if (!Number.isFinite(state.alignmentBaseX)) {
+        state.alignmentBaseX = segment.start;
+      }
+
+      let startLength = 0;
+      let startFromOffcut = false;
+      let currentSourceId: string | undefined = undefined;
+      let foundStart = false;
+      let pendingStartCutWaste = 0;
+
+      const distFromOrigin = segment.start - state.alignmentBaseX;
+      let originAlignmentOffset = (fullPlankLength - (distFromOrigin % fullPlankLength)) % fullPlankLength;
+      if (originAlignmentOffset < 0.1) originAlignmentOffset = fullPlankLength;
+
+      if (state.carryOverOffcut >= settings.minEndPiece) {
+        for (let testStart = state.carryOverOffcut; testStart >= settings.minEndPiece; testStart -= 5) {
+          if (validateConfig(testStart)) {
+            const extraCut = state.carryOverOffcut - testStart;
+            pushStartSideWaste(extraCut, 'start-cut', state.carryOverSourceId);
+            startLength = testStart;
+            startFromOffcut = true;
+            currentSourceId = state.carryOverSourceId;
+            state.carryOverOffcut = 0;
+            state.carryOverSourceId = undefined;
+            state.carryOverOffcutPlacement = null;
+            foundStart = true;
+            break;
+          }
+        }
+      }
+
+      if (!foundStart) {
+        if (state.carryOverOffcut > 0.5) {
+          const discardPlacement = state.carryOverOffcutPlacement;
+          wastePieces.push({
+            x: discardPlacement ? discardPlacement.x : segment.start - state.carryOverOffcut,
+            y: discardPlacement ? discardPlacement.y : row.actualRowTop,
+            w: state.carryOverOffcut,
+            h: discardPlacement ? discardPlacement.h : row.actualRowHeight,
+            type: 'discarded-offcut',
+            sourcePlankId: state.carryOverSourceId
+          });
+        }
+
+        state.carryOverOffcut = 0;
+        state.carryOverSourceId = undefined;
+        state.carryOverOffcutPlacement = null;
+        totalPlanksOpened++;
+
+        if (validateConfig(fullPlankLength)) {
+          startLength = fullPlankLength;
+          foundStart = true;
+        } else if (originAlignmentOffset >= settings.minEndPiece && validateConfig(originAlignmentOffset)) {
+          startLength = originAlignmentOffset;
+          foundStart = true;
+        } else {
+          for (let testStart = fullPlankLength; testStart >= settings.minEndPiece; testStart -= 5) {
+            if (validateConfig(testStart)) {
+              const extraCut = fullPlankLength - testStart;
+              if (extraCut > 0.5) {
+                pendingStartCutWaste = extraCut;
+              }
+              startLength = testStart;
+              foundStart = true;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!foundStart) {
+        startLength = settings.minEndPiece;
+        startFromOffcut = false;
+      }
+
+      const segmentJoints: number[] = [];
+      let curX = segment.start;
+      let isFirstInSegment = true;
+      let safetyPlanks = 0;
+
+      while (curX < segment.end - 0.1 && safetyPlanks < 1000) {
+        safetyPlanks++;
+        const plankLength = isFirstInSegment
+          ? Math.min(startLength, segment.end - curX)
+          : Math.min(fullPlankLength, segment.end - curX);
+        const plankId = `r${row.rowIdx}-${segmentLabel}-p${safetyPlanks}`;
+
+        if (!isFirstInSegment) totalPlanksOpened++;
+
+        const isLastInSegment = (curX + plankLength >= segment.end - 0.1);
+        const isReusedOffcut = isFirstInSegment && startFromOffcut;
+
+        planks.push({
+          id: plankId,
+          x: curX,
+          y: row.actualRowTop,
+          w: plankLength,
+          h: row.actualRowHeight,
+          row: row.rowIdx,
+          isCut: !(Math.abs(plankLength - fullPlankLength) < 0.5 && !isReusedOffcut),
+          fullWidth: rowHeight,
+          fullLength: fullPlankLength,
+          visualX: curX,
+          isFromOffcut: isReusedOffcut,
+          sourcePlankId: isFirstInSegment ? currentSourceId : undefined
+        });
+
+        if (isFirstInSegment && pendingStartCutWaste > 0.5) {
+          pushStartSideWaste(pendingStartCutWaste, 'start-cut', plankId);
+          pendingStartCutWaste = 0;
+        }
+
+        if (isLastInSegment) {
+          state.carryOverOffcut = fullPlankLength - plankLength;
+          state.carryOverSourceId = plankId;
+          state.carryOverOffcutPlacement =
+            state.carryOverOffcut > 0.5
+              ? { x: curX + plankLength + 20, y: row.actualRowTop, h: row.actualRowHeight }
+              : null;
+        } else {
+          segmentJoints.push(curX + plankLength);
+        }
+
+        curX += plankLength;
+        isFirstInSegment = false;
+      }
+
+      return segmentJoints;
+    };
 
     // Calculate row alignment based on origin point and compensation shift
     const alignmentY = baseY - vOffset;
@@ -89,194 +395,168 @@ export const calculateLayout = (
       return performLayout(SHIFT_COMPENSATION);
     }
 
-    let carryOverOffcut = (settings.startOffset) % settings.length;
-    let carryOverSourceId: string | undefined = undefined;
-    let carryOverOffcutPlacement: { x: number; y: number; h: number } | null = null;
-    let lastRowJoints: number[] = [];
-    let rowBeforeLastJoints: number[] = [];
-    let totalPlanksOpened = (settings.startOffset > 0) ? 1 : 0;
-
-    rowTops.forEach((rowTop, rowIdx) => {
-      // The row might be partially outside at the top or bottom
+    const preparedRows: PreparedRow[] = rowTops.map((rowTop, rowIdx) => {
       const actualRowTop = Math.max(rowTop, effectiveMinY);
       const actualRowBottom = Math.min(rowTop + rowHeight, effectiveMaxY);
       const actualRowHeight = actualRowBottom - actualRowTop;
+      const segments = actualRowHeight < 0.1
+        ? []
+        : getWideRowSegments(actualRowTop, actualRowBottom, roomPoints)
+            .map((segment) => ({ start: segment.start + GAP, end: segment.end - GAP }))
+            .filter((segment) => segment.end - segment.start > 0.1);
 
-      if (actualRowHeight < 0.1) return;
+      return {
+        rowIdx,
+        actualRowTop,
+        actualRowHeight,
+        segments
+      };
+    });
 
-      const segments = getWideRowSegments(actualRowTop, actualRowBottom, roomPoints);
-      const currentRowJoints: number[] = [];
+    const twoZonePattern = detectTwoZoneOpeningPattern(preparedRows);
 
-      segments.forEach((segment) => {
-        // Apply horizontal gap
-        const segStart = segment.start + GAP;
-        const segEnd = segment.end - GAP;
-        const segmentWidth = segEnd - segStart;
-        if (segmentWidth <= 0.1) return;
+    if (twoZonePattern) {
+      const leftState = createFlowState((settings.startOffset) % settings.length, baseX);
+      const rightState = createFlowState(0, Number.NaN);
+      const interpolateBoundary = (
+        rowIdx: number,
+        key: 'leftZoneEnd' | 'rightZoneStart'
+      ): number => {
+        const exactAnchor = twoZonePattern.splitAnchors.find((anchor) => anchor.rowIdx === rowIdx);
+        if (exactAnchor) return exactAnchor[key];
 
-        const pushStartSideWaste = (width: number, type: WastePiece['type'], sourcePlankId?: string) => {
-          if (width <= 0.5) return;
-          wastePieces.push({
-            x: segStart - width,
-            y: actualRowTop,
-            w: width,
-            h: actualRowHeight,
-            type,
-            sourcePlankId
-          });
-        };
-
-        const validateConfig = (sLen: number) => {
-          if (sLen < settings.minEndPiece && Math.abs(sLen - fullPlankLength) > 0.1) return false;
-          let currentJoint = segStart + sLen;
-          const testJoints = [];
-          if (currentJoint < segEnd - 0.1) testJoints.push(currentJoint);
-          while (currentJoint + fullPlankLength < segEnd - 0.1) {
-            currentJoint += fullPlankLength;
-            testJoints.push(currentJoint);
+        let prevAnchor: typeof twoZonePattern.splitAnchors[number] | null = null;
+        let nextAnchor: typeof twoZonePattern.splitAnchors[number] | null = null;
+        for (const anchor of twoZonePattern.splitAnchors) {
+          if (anchor.rowIdx < rowIdx) {
+            prevAnchor = anchor;
+            continue;
           }
-          const finalPiece = segEnd - currentJoint;
-          if (finalPiece < settings.minEndPiece && finalPiece > 0.1) return false;
-
-          const hasClashPrev = testJoints.some(tj =>
-            lastRowJoints.some(lj => Math.abs(tj - lj) < settings.minStagger)
-          );
-          if (hasClashPrev) return false;
-
-          const hasClashTwoRowsBack = testJoints.some(tj =>
-            rowBeforeLastJoints.some(lj => Math.abs(tj - lj) < (settings.minStagger / 2))
-          );
-          if (hasClashTwoRowsBack) return false;
-
-          return true;
-        };
-
-        let startLength = 0;
-        let startFromOffcut = false;
-        let currentSourceId: string | undefined = undefined;
-        let foundStart = false;
-        let pendingStartCutWaste = 0;
-
-        // Origin Alignment: How many full planks from baseX to segment start?
-        const distFromOrigin = segStart - baseX;
-        let originAlignmentOffset = (fullPlankLength - (distFromOrigin % fullPlankLength)) % fullPlankLength;
-        if (originAlignmentOffset < 0.1) originAlignmentOffset = fullPlankLength;
-
-        // 1. Try offcut
-        if (carryOverOffcut >= settings.minEndPiece) {
-          for (let testS = carryOverOffcut; testS >= settings.minEndPiece; testS -= 5) {
-            if (validateConfig(testS)) {
-              const extraCut = carryOverOffcut - testS;
-              pushStartSideWaste(extraCut, 'start-cut', carryOverSourceId);
-              startLength = testS;
-              startFromOffcut = true;
-              currentSourceId = carryOverSourceId;
-              carryOverOffcut = 0;
-              carryOverSourceId = undefined;
-              carryOverOffcutPlacement = null;
-              foundStart = true;
-              break;
-            }
+          if (anchor.rowIdx > rowIdx) {
+            nextAnchor = anchor;
+            break;
           }
         }
 
-        // 2. Try full plank first, then origin alignment as fallback
-        if (!foundStart) {
-          if (carryOverOffcut > 0.5) {
-            const discardPlacement = carryOverOffcutPlacement;
-            wastePieces.push({
-              x: discardPlacement ? discardPlacement.x : segStart - carryOverOffcut,
-              y: discardPlacement ? discardPlacement.y : actualRowTop,
-              w: carryOverOffcut,
-              h: discardPlacement ? discardPlacement.h : actualRowHeight,
-              type: 'discarded-offcut',
-              sourcePlankId: carryOverSourceId
-            });
-          }
-          carryOverOffcut = 0;
-          carryOverSourceId = undefined;
-          carryOverOffcutPlacement = null;
-          totalPlanksOpened++;
-
-          if (validateConfig(fullPlankLength)) {
-            startLength = fullPlankLength;
-            foundStart = true;
-          } else if (originAlignmentOffset >= settings.minEndPiece && validateConfig(originAlignmentOffset)) {
-            startLength = originAlignmentOffset;
-            foundStart = true;
-          } else {
-            for (let testS = fullPlankLength; testS >= settings.minEndPiece; testS -= 5) {
-              if (validateConfig(testS)) {
-                const extraCut = fullPlankLength - testS;
-                if (extraCut > 0.5) {
-                  pendingStartCutWaste = extraCut;
-                }
-                startLength = testS;
-                foundStart = true;
-                break;
-              }
-            }
-          }
+        if (prevAnchor && nextAnchor) {
+          const progress = (rowIdx - prevAnchor.rowIdx) / (nextAnchor.rowIdx - prevAnchor.rowIdx);
+          return prevAnchor[key] + ((nextAnchor[key] - prevAnchor[key]) * progress);
         }
 
-        if (!foundStart) {
-          startLength = settings.minEndPiece;
-          startFromOffcut = false;
-        }
+        return (prevAnchor ?? nextAnchor)![key];
+      };
 
-        let curX = segStart;
-        let isFirstInSegment = true;
-        let safetyPlanks = 0;
-
-        while (curX < segEnd - 0.1 && safetyPlanks < 1000) {
-          safetyPlanks++;
-          const pLen = isFirstInSegment ? Math.min(startLength, segEnd - curX) : Math.min(fullPlankLength, segEnd - curX);
-          const plankId = `r${rowIdx}-s${segments.indexOf(segment)}-p${safetyPlanks}`;
-
-          if (!isFirstInSegment) totalPlanksOpened++;
-
-          const isLastInSegment = (curX + pLen >= segEnd - 0.1);
-          const isReusedOffcut = isFirstInSegment && startFromOffcut;
-
-          planks.push({
-            id: plankId,
-            x: curX,
-            y: actualRowTop,
-            w: pLen,
-            h: actualRowHeight,
-            row: rowIdx,
-            isCut: !(Math.abs(pLen - fullPlankLength) < 0.5 && !isReusedOffcut),
-            fullWidth: rowHeight,
-            fullLength: fullPlankLength,
-            visualX: curX,
-            isFromOffcut: isReusedOffcut,
-            sourcePlankId: isFirstInSegment ? currentSourceId : undefined
-          });
-
-          if (isFirstInSegment && pendingStartCutWaste > 0.5) {
-            pushStartSideWaste(pendingStartCutWaste, 'start-cut', plankId);
-            pendingStartCutWaste = 0;
-          }
-
-          if (isLastInSegment) {
-            carryOverOffcut = fullPlankLength - pLen;
-            carryOverSourceId = plankId;
-            carryOverOffcutPlacement =
-              carryOverOffcut > 0.5
-                ? { x: curX + pLen + 20, y: actualRowTop, h: actualRowHeight }
-                : null;
-          } else {
-            currentRowJoints.push(curX + pLen);
-          }
-
-          curX += pLen;
-          isFirstInSegment = false;
-        }
+      const getRowBoundaries = (rowIdx: number) => ({
+        leftZoneEnd: interpolateBoundary(rowIdx, 'leftZoneEnd'),
+        rightZoneStart: interpolateBoundary(rowIdx, 'rightZoneStart')
       });
 
-      rowBeforeLastJoints = lastRowJoints;
-      lastRowJoints = currentRowJoints;
-    });
+      const classifySingleSegment = (
+        rowIdx: number,
+        segment: PreparedSegment
+      ): 'left-only' | 'bridge' | 'right-only' | null => {
+        const { leftZoneEnd, rightZoneStart } = getRowBoundaries(rowIdx);
+        if (segment.end <= leftZoneEnd + twoZonePattern.tolerance) return 'left-only';
+        if (segment.start >= rightZoneStart - twoZonePattern.tolerance) return 'right-only';
+        if (
+          segment.start <= leftZoneEnd + twoZonePattern.tolerance &&
+          segment.end >= rightZoneStart - twoZonePattern.tolerance
+        ) {
+          return 'bridge';
+        }
+        return null;
+      };
+
+      preparedRows.forEach((row) => {
+        if (row.actualRowHeight < 0.1) return;
+
+        if (row.segments.length === 2) {
+          const leftRowJoints = placeSegment(row, row.segments[0], 'left', leftState);
+          const rightRowJoints = placeSegment(row, row.segments[1], 'right', rightState);
+          commitRowState(leftState, leftRowJoints);
+          commitRowState(rightState, rightRowJoints);
+          return;
+        }
+
+        if (row.segments.length !== 1) {
+          commitRowState(leftState, []);
+          commitRowState(rightState, []);
+          return;
+        }
+
+        const singleSegmentType = classifySingleSegment(row.rowIdx, row.segments[0]);
+        if (singleSegmentType === 'left-only') {
+          const leftRowJoints = placeSegment(row, row.segments[0], 'leftsolo', leftState);
+          commitRowState(leftState, leftRowJoints);
+          commitRowState(rightState, []);
+          return;
+        }
+
+        if (singleSegmentType === 'right-only') {
+          const rightRowJoints = placeSegment(row, row.segments[0], 'rightsolo', rightState);
+          commitRowState(leftState, []);
+          commitRowState(rightState, rightRowJoints);
+          return;
+        }
+
+        if (singleSegmentType !== 'bridge') {
+          commitRowState(leftState, []);
+          commitRowState(rightState, []);
+          return;
+        }
+
+        const bridgeState: LayoutFlowState = {
+          carryOverOffcut: leftState.carryOverOffcut,
+          carryOverSourceId: leftState.carryOverSourceId,
+          carryOverOffcutPlacement: clonePlacement(leftState.carryOverOffcutPlacement),
+          lastRowJoints: leftState.lastRowJoints,
+          rowBeforeLastJoints: leftState.rowBeforeLastJoints,
+          alignmentBaseX: leftState.alignmentBaseX
+        };
+
+        const { leftZoneEnd, rightZoneStart } = getRowBoundaries(row.rowIdx);
+        const inLeftZone = (jointX: number) => jointX <= leftZoneEnd + twoZonePattern.tolerance;
+        const inRightZone = (jointX: number) => jointX >= rightZoneStart - twoZonePattern.tolerance;
+
+        const bridgeRowJoints = placeSegment(
+          row,
+          row.segments[0],
+          'bridge',
+          bridgeState,
+          (jointX) =>
+            (inLeftZone(jointX) && leftState.lastRowJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < settings.minStagger)) ||
+            (inRightZone(jointX) && rightState.lastRowJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < settings.minStagger)),
+          (jointX) =>
+            (inLeftZone(jointX) && leftState.rowBeforeLastJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < (settings.minStagger / 2))) ||
+            (inRightZone(jointX) && rightState.rowBeforeLastJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < (settings.minStagger / 2)))
+        );
+
+        const leftBridgeJoints = bridgeRowJoints.filter(inLeftZone);
+        const rightBridgeJoints = bridgeRowJoints.filter(inRightZone);
+
+        leftState.carryOverOffcut = 0;
+        leftState.carryOverSourceId = undefined;
+        leftState.carryOverOffcutPlacement = null;
+        rightState.carryOverOffcut = bridgeState.carryOverOffcut;
+        rightState.carryOverSourceId = bridgeState.carryOverSourceId;
+        rightState.carryOverOffcutPlacement = clonePlacement(bridgeState.carryOverOffcutPlacement);
+
+        commitRowState(leftState, leftBridgeJoints);
+        commitRowState(rightState, rightBridgeJoints);
+      });
+    } else {
+      const globalState = createFlowState((settings.startOffset) % settings.length, baseX);
+
+      preparedRows.forEach((row) => {
+        if (row.actualRowHeight < 0.1) return;
+
+        const currentRowJoints: number[] = [];
+        row.segments.forEach((segment, segmentIdx) => {
+          currentRowJoints.push(...placeSegment(row, segment, `s${segmentIdx}`, globalState));
+        });
+        commitRowState(globalState, currentRowJoints);
+      });
+    }
 
     return { planks, wastePieces, totalPlanksOpened };
   };
