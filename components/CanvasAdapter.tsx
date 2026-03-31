@@ -352,13 +352,9 @@ export default function CanvasAdapter({
   const maxMinPiece = Math.max(0, settings.length / 2);
 
   const BOTTOM_BAR_H = 56;
-  const isTouchDevice = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
-  // On mobile the right-side panel contains 7 buttons + separator ≈ 418px minimum.
-  // Use 440px as safe floor so no button is clipped.
-  const MOBILE_MIN_CANVAS_H = 440;
-  const effectiveCanvasHeight = isTouchDevice
-    ? Math.max(containerHeight, MOBILE_MIN_CANVAS_H)
-    : containerHeight;
+  // The right-side panel needs ~420px to fit all buttons. 440 is the safe minimum.
+  // containerHeight for desktop is always ≥480, so this only enlarges mobile canvases.
+  const effectiveCanvasHeight = Math.max(containerHeight, 440);
 
   return (
     <>
