@@ -512,24 +512,20 @@ export default function CanvasOverlayControls({
                 onClick={onToggleDrawing}
                 icon={<ImageIcon visible={drawingVisible} />}
               />
-              {isMobile && (
-                <>
-                  <ActionButton
-                    label={showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
-                    open={isRailOpen}
-                    active={showEdgeLengths}
-                    onClick={onToggleEdgeLengths}
-                    icon={<MeasureIcon />}
-                  />
-                  <ActionButton
-                    label={showPlanks ? 'Dölj brädor' : 'Visa brädor'}
-                    open={isRailOpen}
-                    active={showPlanks}
-                    onClick={onTogglePlanks}
-                    icon={<PlanksIcon />}
-                  />
-                </>
-              )}
+              <ActionButton
+                label={showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
+                open={isRailOpen}
+                active={showEdgeLengths}
+                onClick={onToggleEdgeLengths}
+                icon={<MeasureIcon />}
+              />
+              <ActionButton
+                label={showPlanks ? 'Dölj brädor' : 'Visa brädor'}
+                open={isRailOpen}
+                active={showPlanks}
+                onClick={onTogglePlanks}
+                icon={<PlanksIcon />}
+              />
               <ActionButton
                 label={contrastEnabled ? 'Kontrast av' : 'Kontrast på'}
                 open={isRailOpen}
