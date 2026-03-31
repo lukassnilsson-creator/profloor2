@@ -352,6 +352,9 @@ export default function CanvasAdapter({
   const maxMinPiece = Math.max(0, settings.length / 2);
 
   const BOTTOM_BAR_H = 56;
+  // The right-side panel needs ~420px to fit all buttons. 440 is the safe minimum.
+  // containerHeight for desktop is always ≥480, so this only enlarges mobile canvases.
+  const effectiveCanvasHeight = Math.max(containerHeight, 440);
 
   return (
     <>
@@ -362,7 +365,7 @@ export default function CanvasAdapter({
     >
       {/* Canvas area */}
       <div
-        style={{ height: `${containerHeight}px` }}
+        style={{ height: `${effectiveCanvasHeight}px` }}
         className="rounded-t-xl border border-b-0 border-[#EAE6E3] bg-white relative overflow-hidden"
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
         onDrop={(e) => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) handleImportFile(file); }}
@@ -411,6 +414,7 @@ export default function CanvasAdapter({
           showPlanks={showPlanks}
           onTogglePlanks={() => setShowPlanks(p => !p)}
           onResetDesign={onResetDesign}
+          isMobile={typeof window !== 'undefined' && window.innerWidth < 640}
           onOptimize={handleOptimize}
           onRotate={handleToggleRotate}
           isRotated={settings.layoutRotated}

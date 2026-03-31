@@ -464,7 +464,7 @@ export default function CanvasOverlayControls({
       <aside className="pointer-events-auto absolute inset-y-0 right-0 z-40 flex">
         <div
           className={`flex h-full flex-col border-l border-[#d9d9d9] bg-white/92 backdrop-blur-sm transition-[width] duration-200 ease-out ${
-            isRailOpen ? 'w-[188px]' : isMobile ? 'w-[46px]' : 'w-[54px]'
+            isRailOpen ? 'w-[188px]' : isMobile ? 'w-[40px]' : 'w-[54px]'
           }`}
         >
           <div className="px-3 py-3">
