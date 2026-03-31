@@ -2458,6 +2458,7 @@ const App: React.FC = () => {
                 showPlanks={showPlanks}
                 onTogglePlanks={() => setShowPlanks((prev) => !prev)}
                 isMobile={isMobile}
+                onResetDesign={handleReset}
                 onOptimize={handleOptimizeLayout}
                 onRotate={handleToggleLayoutRotation}
                 isRotated={settings.layoutRotated}

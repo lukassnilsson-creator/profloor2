@@ -31,6 +31,7 @@ interface CanvasOverlayControlsProps {
   showPlanks: boolean;
   onTogglePlanks: () => void;
   isMobile?: boolean;
+  onResetDesign?: () => void;
   onOptimize: () => void;
   onRotate: () => void;
   isRotated: boolean;
@@ -216,6 +217,14 @@ function ContrastIcon({ enabled }: { enabled: boolean }) {
   );
 }
 
+function ResetIcon() {
+  return (
+    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" />
+    </svg>
+  );
+}
+
 function MeasureIcon() {
   return (
     <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -329,6 +338,7 @@ export default function CanvasOverlayControls({
   showPlanks,
   onTogglePlanks,
   isMobile = false,
+  onResetDesign,
   onOptimize,
   onRotate,
   isRotated,
@@ -537,6 +547,17 @@ export default function CanvasOverlayControls({
                 onClick={onToggleContrast}
                 icon={<ContrastIcon enabled={contrastEnabled} />}
               />
+              {onResetDesign && !isLocked && (
+                <>
+                  <div className="my-1 border-t border-[#ececec]" />
+                  <ActionButton
+                    label="Återställ design"
+                    open={isRailOpen}
+                    onClick={onResetDesign}
+                    icon={<ResetIcon />}
+                  />
+                </>
+              )}
             </div>
 
             <div className="space-y-0.5 px-3">

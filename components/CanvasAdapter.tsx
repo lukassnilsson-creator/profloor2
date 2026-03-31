@@ -410,6 +410,7 @@ export default function CanvasAdapter({
           onToggleEdgeLengths={() => setShowEdgeLengths(p => !p)}
           showPlanks={showPlanks}
           onTogglePlanks={() => setShowPlanks(p => !p)}
+          onResetDesign={onResetDesign}
           onOptimize={handleOptimize}
           onRotate={handleToggleRotate}
           isRotated={settings.layoutRotated}
