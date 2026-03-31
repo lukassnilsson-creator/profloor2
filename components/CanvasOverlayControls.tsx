@@ -26,6 +26,11 @@ interface CanvasOverlayControlsProps {
   onZoomIn: () => void;
   onZoomExtents: () => void;
   onZoomOut: () => void;
+  showEdgeLengths: boolean;
+  onToggleEdgeLengths: () => void;
+  showPlanks: boolean;
+  onTogglePlanks: () => void;
+  isMobile?: boolean;
   onOptimize: () => void;
   onRotate: () => void;
   isRotated: boolean;
@@ -211,6 +216,24 @@ function ContrastIcon({ enabled }: { enabled: boolean }) {
   );
 }
 
+function MeasureIcon() {
+  return (
+    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M3 17h18M3 17l3-3m-3 3l3 3M21 17l-3-3m3 3l-3 3M7 17V7m4 10V11m4 6V9m4 8V5" />
+    </svg>
+  );
+}
+
+function PlanksIcon() {
+  return (
+    <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="2" y="4" width="20" height="4" rx="1" strokeWidth="1.8" />
+      <rect x="2" y="10" width="20" height="4" rx="1" strokeWidth="1.8" />
+      <rect x="2" y="16" width="20" height="4" rx="1" strokeWidth="1.8" />
+    </svg>
+  );
+}
+
 function ZoomExtentsIcon() {
   return (
     <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -297,6 +320,11 @@ export default function CanvasOverlayControls({
   onZoomIn,
   onZoomExtents,
   onZoomOut,
+  showEdgeLengths,
+  onToggleEdgeLengths,
+  showPlanks,
+  onTogglePlanks,
+  isMobile = false,
   onOptimize,
   onRotate,
   isRotated,
@@ -418,7 +446,7 @@ export default function CanvasOverlayControls({
       <aside className="pointer-events-auto absolute inset-y-0 right-0 z-40 flex">
         <div
           className={`flex h-full flex-col border-l border-[#d9d9d9] bg-white/92 backdrop-blur-sm transition-[width] duration-200 ease-out ${
-            isRailOpen ? 'w-[188px]' : 'w-[54px]'
+            isRailOpen ? 'w-[188px]' : isMobile ? 'w-[46px]' : 'w-[54px]'
           }`}
         >
           <div className="px-3 py-3">
@@ -447,32 +475,19 @@ export default function CanvasOverlayControls({
 
           <div className="flex flex-1 flex-col justify-between pb-3">
             <div className="space-y-0.5 px-3">
-              <ActionButton
-                label={importLabel}
-                open={isRailOpen}
-                warning={importDropActive}
-                onClick={onImportClick}
-                icon={<ImportIcon />}
-                onDragEnter={onImportDragEnter}
-                onDragOver={onImportDragOver}
-                onDragLeave={onImportDragLeave}
-                onDrop={onImportDrop}
-              />
-              <ActionButton
-                label={drawingVisible ? 'Göm ritning' : 'Visa ritning'}
-                open={isRailOpen}
-                active={drawingAvailable && drawingVisible}
-                disabled={!drawingAvailable}
-                onClick={onToggleDrawing}
-                icon={<ImageIcon visible={drawingVisible} />}
-              />
-              <ActionButton
-                label={shareCopied ? 'Kopierat!' : 'Dela'}
-                open={isRailOpen}
-                success={shareCopied}
-                onClick={onShareClick}
-                icon={<ShareIcon copied={shareCopied} />}
-              />
+              {!isMobile && (
+                <ActionButton
+                  label={importLabel}
+                  open={isRailOpen}
+                  warning={importDropActive}
+                  onClick={onImportClick}
+                  icon={<ImportIcon />}
+                  onDragEnter={onImportDragEnter}
+                  onDragOver={onImportDragOver}
+                  onDragLeave={onImportDragLeave}
+                  onDrop={onImportDrop}
+                />
+              )}
               <ActionButton
                 label={saveLabel}
                 open={isRailOpen}
@@ -483,6 +498,39 @@ export default function CanvasOverlayControls({
                 title={saveTitle}
               />
               <ActionButton
+                label={shareCopied ? 'Kopierat!' : 'Dela'}
+                open={isRailOpen}
+                success={shareCopied}
+                onClick={onShareClick}
+                icon={<ShareIcon copied={shareCopied} />}
+              />
+              <ActionButton
+                label={drawingVisible ? 'Göm ritning' : 'Visa ritning'}
+                open={isRailOpen}
+                active={drawingAvailable && drawingVisible}
+                disabled={!drawingAvailable}
+                onClick={onToggleDrawing}
+                icon={<ImageIcon visible={drawingVisible} />}
+              />
+              {isMobile && (
+                <>
+                  <ActionButton
+                    label={showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
+                    open={isRailOpen}
+                    active={showEdgeLengths}
+                    onClick={onToggleEdgeLengths}
+                    icon={<MeasureIcon />}
+                  />
+                  <ActionButton
+                    label={showPlanks ? 'Dölj brädor' : 'Visa brädor'}
+                    open={isRailOpen}
+                    active={showPlanks}
+                    onClick={onTogglePlanks}
+                    icon={<PlanksIcon />}
+                  />
+                </>
+              )}
+              <ActionButton
                 label={contrastEnabled ? 'Kontrast av' : 'Kontrast på'}
                 open={isRailOpen}
                 active={contrastEnabled}
@@ -492,23 +540,27 @@ export default function CanvasOverlayControls({
             </div>
 
             <div className="space-y-0.5 px-3">
-              <ActionButton
-                label="Zooma in"
-                open={isRailOpen}
-                onClick={onZoomIn}
-                icon={<span className="text-[22px] leading-none">+</span>}
-              />
+              {!isMobile && (
+                <>
+                  <ActionButton
+                    label="Zooma in"
+                    open={isRailOpen}
+                    onClick={onZoomIn}
+                    icon={<span className="text-[22px] leading-none">+</span>}
+                  />
+                  <ActionButton
+                    label="Zooma ut"
+                    open={isRailOpen}
+                    onClick={onZoomOut}
+                    icon={<span className="text-[22px] leading-none">−</span>}
+                  />
+                </>
+              )}
               <ActionButton
                 label="Visa hela"
                 open={isRailOpen}
                 onClick={onZoomExtents}
                 icon={<ZoomExtentsIcon />}
-              />
-              <ActionButton
-                label="Zooma ut"
-                open={isRailOpen}
-                onClick={onZoomOut}
-                icon={<span className="text-[22px] leading-none">−</span>}
               />
             </div>
           </div>

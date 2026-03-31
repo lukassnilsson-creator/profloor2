@@ -34,6 +34,8 @@ interface CanvasProps {
   planLocked?: boolean;
   stats: Stats;
   productInfo: ProductInfo | null;
+  showPlanks: boolean;
+  onTogglePlanks: () => void;
 }
 
 interface PointContextMenu {
@@ -51,13 +53,7 @@ interface EdgeContextMenu {
   cursor: { x: number; y: number };
 }
 
-interface CanvasContextMenu {
-  kind: 'canvas';
-  x: number;
-  y: number;
-}
-
-type ContextMenu = PointContextMenu | EdgeContextMenu | CanvasContextMenu;
+type ContextMenu = PointContextMenu | EdgeContextMenu;
 
 interface GestureLikeEvent extends Event {
   scale?: number;
@@ -123,7 +119,9 @@ const Canvas: React.FC<CanvasProps> = ({
   disableEdgeEditing = false,
   planLocked = false,
   stats,
-  productInfo
+  productInfo,
+  showPlanks,
+  onTogglePlanks,
 }) => {
   const isTouchDevice = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
   const containerRef = useRef<HTMLDivElement>(null);
@@ -149,10 +147,8 @@ const Canvas: React.FC<CanvasProps> = ({
   const [isLegendExpanded, setIsLegendExpanded] = useState(false);
   const [toolPanelOffset, setToolPanelOffset] = useState(loadToolPanelOffset);
   const [showGrid, setShowGrid] = useState(false);
-  const [showPlanks, setShowPlanks] = useState(true);
   const [selectedPlankId, setSelectedPlankId] = useState<string | null>(null);
   const setSelectedPlankIdRef = useRef(setSelectedPlankId);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [infoPanelOffset, setInfoPanelOffset] = useState({ x: 0, y: 0 });
   const infoPanelDragRef = useRef<{ startClientX: number; startClientY: number; startOffsetX: number; startOffsetY: number } | null>(null);
   useEffect(() => { setInfoPanelOffset({ x: 0, y: 0 }); }, [selectedPlankId]);
@@ -904,7 +900,6 @@ const Canvas: React.FC<CanvasProps> = ({
               return;
             }
           }
-          setContextMenu({ kind: 'canvas', x: lx, y: ly });
         }, 550);
       }
     };
@@ -1003,8 +998,6 @@ const Canvas: React.FC<CanvasProps> = ({
             return;
           }
         }
-
-        setContextMenu({ kind: 'canvas', x: event.clientX, y: event.clientY });
       }}
       style={{
         userSelect: 'none',
@@ -1242,142 +1235,7 @@ const Canvas: React.FC<CanvasProps> = ({
                 </div>
               )}
             </>
-          ) : (
-            <>
-              <div className="px-1.5 py-0.5">
-                <button
-                  type="button"
-                  onClick={() => { onToggleEdgeLengths(); setContextMenu(null); }}
-                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
-                >
-                  {showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
-                </button>
-              </div>
-
-              <div className="px-1.5 py-0.5">
-                <button
-                  type="button"
-                  onClick={() => { setShowPlanks((prev) => !prev); setContextMenu(null); }}
-                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
-                >
-                  {showPlanks ? 'Dölj brädor' : 'Visa brädor'}
-                </button>
-              </div>
-
-              <div className="px-1.5 py-0.5">
-                <button
-                  type="button"
-                  onClick={() => { setSettings({ ...settings, visualContrast: settings.visualContrast > 0 ? 0 : 0.3 }); setContextMenu(null); }}
-                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
-                >
-                  {settings.visualContrast > 0 ? 'Läggningskontrast av' : 'Läggningskontrast på'}
-                </button>
-              </div>
-
-              <div className="px-1.5 py-0.5">
-                <button
-                  type="button"
-                  disabled={!backgroundDrawing}
-                  onClick={() => { if (!backgroundDrawing) return; onBackgroundOpacityChange(backgroundOpacity > 0 ? 0 : 0.4); setContextMenu(null); }}
-                  className={`pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium transition-colors ${
-                    !backgroundDrawing ? 'cursor-not-allowed text-[#B0B0B0]' : 'text-[#333333] hover:bg-[#f0f0f0]'
-                  }`}
-                >
-                  {backgroundDrawing && backgroundOpacity > 0 ? 'Dölj ritning' : 'Visa ritning'}
-                </button>
-              </div>
-
-              <div className="px-1.5 py-0.5">
-                <button
-                  type="button"
-                  onClick={() => { setShowGrid((prev) => !prev); setContextMenu(null); }}
-                  className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors"
-                >
-                  {showGrid ? 'Dölj stödraster' : 'Visa stödraster'}
-                </button>
-              </div>
-
-              {!planLocked && (
-                <>
-                  <div className="my-1 border-t border-[#ECE7E3]" />
-
-                  <div className="px-1.5 py-0.5">
-                    <button
-                      type="button"
-                      onClick={() => { onResetDesign?.(); setContextMenu(null); }}
-                      className="pf-action-heading w-full rounded-full px-3 py-1.5 text-left text-[10px] font-medium text-[#C41230] hover:bg-[#fff0f1] transition-colors flex items-center gap-1.5"
-                    >
-                      <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" />
-                      </svg>
-                      <span>Återställ design</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </div>
-      )}
-
-      {/* Mobile hamburger FAB — shown only on touch devices */}
-      {isTouchDevice && (
-        <div className="pointer-events-auto absolute bottom-6 right-6 z-40">
-          {mobileMenuOpen && (
-            <div
-              className="absolute bottom-14 right-0 w-[168px] rounded-2xl border border-[#aaaaaa] bg-white py-1.5 shadow-[0_4px_24px_rgba(0,0,0,0.15)]"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="px-1.5 py-0.5">
-                <button type="button" onClick={() => { onToggleEdgeLengths(); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors">
-                  {showEdgeLengths ? 'Dölj mått' : 'Visa mått'}
-                </button>
-              </div>
-              <div className="px-1.5 py-0.5">
-                <button type="button" onClick={() => { setShowPlanks((prev) => !prev); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors">
-                  {showPlanks ? 'Dölj brädor' : 'Visa brädor'}
-                </button>
-              </div>
-              <div className="px-1.5 py-0.5">
-                <button type="button" onClick={() => { setSettings({ ...settings, visualContrast: settings.visualContrast > 0 ? 0 : 0.3 }); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors">
-                  {settings.visualContrast > 0 ? 'Kontrast av' : 'Kontrast på'}
-                </button>
-              </div>
-              <div className="px-1.5 py-0.5">
-                <button type="button" disabled={!backgroundDrawing} onClick={() => { if (!backgroundDrawing) return; onBackgroundOpacityChange(backgroundOpacity > 0 ? 0 : 0.4); setMobileMenuOpen(false); }} className={`pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium transition-colors ${!backgroundDrawing ? 'cursor-not-allowed text-[#B0B0B0]' : 'text-[#333333] hover:bg-[#f0f0f0]'}`}>
-                  {backgroundDrawing && backgroundOpacity > 0 ? 'Dölj ritning' : 'Visa ritning'}
-                </button>
-              </div>
-              <div className="px-1.5 py-0.5">
-                <button type="button" onClick={() => { setShowGrid((prev) => !prev); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#333333] hover:bg-[#f0f0f0] transition-colors">
-                  {showGrid ? 'Dölj stödraster' : 'Visa stödraster'}
-                </button>
-              </div>
-              {!planLocked && (
-                <>
-                  <div className="my-1 border-t border-[#ECE7E3]" />
-                  <div className="px-1.5 py-0.5">
-                    <button type="button" onClick={() => { onResetDesign?.(); setMobileMenuOpen(false); }} className="pf-action-heading w-full rounded-full px-3 py-2 text-left text-[11px] font-medium text-[#C41230] hover:bg-[#fff0f1] transition-colors flex items-center gap-1.5">
-                      <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 7h12M9 7V5h6v2m-8 0l1 12h8l1-12M10 11v6m4-6v6" /></svg>
-                      <span>Återställ design</span>
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-          <button
-            type="button"
-            onClick={() => setMobileMenuOpen((prev) => !prev)}
-            aria-label="Meny"
-            className="flex h-12 w-12 items-center justify-center rounded-full bg-white border border-[#aaaaaa] shadow-[0_2px_12px_rgba(0,0,0,0.18)] text-[#333333] transition-colors hover:bg-[#F3F0ED] active:bg-[#EAE6E3]"
-          >
-            {mobileMenuOpen ? (
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M6 18L18 6M6 6l12 12" /></svg>
-            ) : (
-              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" /></svg>
-            )}
-          </button>
+          ) : null}
         </div>
       )}
 
