@@ -106,7 +106,7 @@ interface LayoutOptimizationConstraints {
 }
 
 const DEFAULT_OPTIMIZATION_CONSTRAINTS: LayoutOptimizationConstraints = {
-  minStaggerMin: 250,
+  minStaggerMin: 300,
   minStaggerMax: 500,
   iterations: 120,
 };
@@ -118,39 +118,85 @@ const findOptimizedLayout = (
 ): Pick<PlankSettings, 'startOffset' | 'startOffsetVertical' | 'minStagger'> => {
   const staggerCeiling = Math.min(constraints.minStaggerMax, Math.floor(settings.length / 2));
   const staggerFloor = Math.min(constraints.minStaggerMin, staggerCeiling);
-  const staggerRange = Math.max(0, staggerCeiling - staggerFloor);
+  const staggerLevels: number[] = [];
+  for (let value = staggerCeiling; value >= staggerFloor; value -= 10) {
+    staggerLevels.push(value);
+  }
+  if (staggerLevels.length === 0 || staggerLevels[staggerLevels.length - 1] !== staggerFloor) {
+    staggerLevels.push(staggerFloor);
+  }
 
   // Apply the same room-rotation the main layout path uses
   const effectivePoints = settings.layoutRotated
     ? points.map((p) => ({ x: p.y, y: -p.x }))
     : points;
 
-  // Prefer 0 offset (full plank start) as baseline — only a strictly better result wins
-  const midStagger = Math.round(staggerFloor + staggerRange / 2);
-  const zeroCandidate: PlankSettings = { ...settings, startOffset: 0, startOffsetVertical: 0, minStagger: midStagger };
-  const { totalPlanksOpened: zeroOpened } = calculateLayout(effectivePoints, zeroCandidate);
-  let bestPlanksOpened = zeroOpened;
-  let best = { startOffset: 0, startOffsetVertical: 0, minStagger: midStagger };
+  type LayoutCandidate = Pick<PlankSettings, 'startOffset' | 'startOffsetVertical' | 'minStagger'> & {
+    totalPlanksOpened: number;
+    packageCount: number;
+  };
 
-  for (let i = 0; i < constraints.iterations; i++) {
-    const candidate: PlankSettings = {
+  const packageSize = Math.max(1, settings.planksPerPackage || 1);
+  const samplesPerLevel = Math.max(4, Math.floor(constraints.iterations / Math.max(1, staggerLevels.length)));
+  const seen = new Set<string>();
+  const candidates: LayoutCandidate[] = [];
+
+  const evaluateCandidate = (startOffset: number, startOffsetVertical: number, minStagger: number) => {
+    const key = `${startOffset}|${startOffsetVertical}|${minStagger}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    const candidateSettings: PlankSettings = {
       ...settings,
-      startOffset: Math.round(Math.random() * settings.length),
-      startOffsetVertical: Math.round(Math.random() * settings.width),
-      minStagger: Math.round(staggerFloor + Math.random() * staggerRange),
+      startOffset,
+      startOffsetVertical,
+      minStagger,
     };
-    const { totalPlanksOpened } = calculateLayout(effectivePoints, candidate);
-    if (totalPlanksOpened < bestPlanksOpened) {
-      bestPlanksOpened = totalPlanksOpened;
-      best = {
-        startOffset: candidate.startOffset,
-        startOffsetVertical: candidate.startOffsetVertical,
-        minStagger: candidate.minStagger,
-      };
+
+    const { totalPlanksOpened } = calculateLayout(effectivePoints, candidateSettings);
+    candidates.push({
+      startOffset,
+      startOffsetVertical,
+      minStagger,
+      totalPlanksOpened,
+      packageCount: Math.ceil(totalPlanksOpened / packageSize),
+    });
+  };
+
+  staggerLevels.forEach((minStagger) => {
+    evaluateCandidate(0, 0, minStagger);
+    for (let sampleIdx = 1; sampleIdx < samplesPerLevel; sampleIdx++) {
+      evaluateCandidate(
+        Math.round(Math.random() * settings.length),
+        Math.round(Math.random() * settings.width),
+        minStagger
+      );
     }
+  });
+
+  if (candidates.length === 0) {
+    return { startOffset: 0, startOffsetVertical: 0, minStagger: staggerCeiling };
   }
 
-  return best;
+  const minPackageCount = Math.min(...candidates.map((candidate) => candidate.packageCount));
+  const packageSafeCandidates = candidates.filter((candidate) => candidate.packageCount === minPackageCount);
+  const minOpened = Math.min(...packageSafeCandidates.map((candidate) => candidate.totalPlanksOpened));
+  const allowedOpened = minOpened + 1;
+  const staggerPreferredCandidates = packageSafeCandidates.filter((candidate) => candidate.totalPlanksOpened <= allowedOpened);
+
+  staggerPreferredCandidates.sort((a, b) =>
+    b.minStagger - a.minStagger ||
+    a.totalPlanksOpened - b.totalPlanksOpened ||
+    a.startOffset - b.startOffset ||
+    a.startOffsetVertical - b.startOffsetVertical
+  );
+
+  const best = staggerPreferredCandidates[0] ?? packageSafeCandidates[0];
+  return {
+    startOffset: best.startOffset,
+    startOffsetVertical: best.startOffsetVertical,
+    minStagger: best.minStagger,
+  };
 };
 
 const toProductDesignSettings = (settings: PlankSettings): ProductDesignSettings => ({
@@ -501,6 +547,7 @@ const loadFloorDesignState = (): FloorDesignState => {
 const App: React.FC = () => {
   const [designState, setDesignState] = useState<FloorDesignState>(loadFloorDesignState);
   const [showEdgeLengths, setShowEdgeLengths] = useState(true);
+  const [showPlanks, setShowPlanks] = useState(true);
   const [gridSize, setGridSize] = useState(100);
   const [snapToGrid, setSnapToGrid] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
@@ -1489,8 +1536,8 @@ const App: React.FC = () => {
       let finalSettings = baseSettings;
       if (isNewProduct && design.points.length >= 3) {
         const minStaggerMin = baseSettings.length < 1000
-          ? Math.ceil(baseSettings.length * 0.25 / 10) * 10
-          : 250;
+          ? Math.max(300, Math.ceil(baseSettings.length * 0.25 / 10) * 10)
+          : 300;
         const constraints = { ...DEFAULT_OPTIMIZATION_CONSTRAINTS, minStaggerMin };
         const optimized = findOptimizedLayout(design.points, baseSettings, constraints);
         finalSettings = { ...baseSettings, ...optimized };
@@ -1582,8 +1629,8 @@ const App: React.FC = () => {
       let finalSettings = baseSettings;
       if (isNewProduct && target.points.length >= 3) {
         const minStaggerMin = baseSettings.length < 1000
-          ? Math.ceil(baseSettings.length * 0.25 / 10) * 10
-          : 250;
+          ? Math.max(300, Math.ceil(baseSettings.length * 0.25 / 10) * 10)
+          : 300;
         const optimized = findOptimizedLayout(target.points, baseSettings, { ...DEFAULT_OPTIMIZATION_CONSTRAINTS, minStaggerMin });
         finalSettings = { ...baseSettings, ...optimized };
       }
@@ -1631,8 +1678,8 @@ const App: React.FC = () => {
   const handleOptimizeLayout = () => {
     if (points.length < 3) return;
     const minStaggerMin = settings.length < 1000
-      ? Math.ceil(settings.length * 0.25 / 10) * 10
-      : 250;
+      ? Math.max(300, Math.ceil(settings.length * 0.25 / 10) * 10)
+      : 300;
     const constraints = { ...DEFAULT_OPTIMIZATION_CONSTRAINTS, minStaggerMin };
     const optimized = findOptimizedLayout(points, settings, constraints);
     setActiveSettings({ ...settings, ...optimized });
@@ -2406,6 +2453,12 @@ const App: React.FC = () => {
                 onZoomIn={() => handleZoomStep(1)}
                 onZoomExtents={() => handleZoomExtents()}
                 onZoomOut={() => handleZoomStep(-1)}
+                showEdgeLengths={showEdgeLengths}
+                onToggleEdgeLengths={() => setShowEdgeLengths((prev) => !prev)}
+                showPlanks={showPlanks}
+                onTogglePlanks={() => setShowPlanks((prev) => !prev)}
+                isMobile={isMobile}
+                onResetDesign={handleReset}
                 onOptimize={handleOptimizeLayout}
                 onRotate={handleToggleLayoutRotation}
                 isRotated={settings.layoutRotated}
@@ -2435,6 +2488,8 @@ const App: React.FC = () => {
                 offset={offset}
                 setOffset={setActiveOffset}
                 showEdgeLengths={showEdgeLengths}
+                showPlanks={showPlanks}
+                onTogglePlanks={() => setShowPlanks((prev) => !prev)}
                 gridSize={gridSize}
                 snapToGrid={snapToGrid}
                 onToggleSnapToGrid={() => setSnapToGrid((prev) => !prev)}

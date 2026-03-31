@@ -104,6 +104,28 @@ export const calculateLayout = (
     state.lastRowJoints = currentRowJoints;
   };
 
+  const getEffectiveMinStagger = (segmentLength: number) => {
+    const standardStagger = settings.minStagger;
+    const reducedStaggerFloor = Math.min(300, standardStagger);
+
+    if (standardStagger <= reducedStaggerFloor || segmentLength >= 1000) {
+      return standardStagger;
+    }
+
+    if (segmentLength <= 800) {
+      return reducedStaggerFloor;
+    }
+
+    const progress = (segmentLength - 800) / 200;
+    const interpolated = reducedStaggerFloor + ((standardStagger - reducedStaggerFloor) * progress);
+    return Math.round(interpolated / 10) * 10;
+  };
+
+  const getVisualBackRowSpacing = (effectiveMinStagger: number) => {
+    const visualFloor = Math.min(250, effectiveMinStagger);
+    return Math.max(visualFloor, Math.round((effectiveMinStagger * 0.7) / 10) * 10);
+  };
+
   const detectTwoZoneOpeningPattern = (rows: PreparedRow[]): TwoZoneOpeningPattern | null => {
     if (rows.length < 2) return null;
 
@@ -189,6 +211,44 @@ export const calculateLayout = (
     const wastePieces: WastePiece[] = [];
     let totalPlanksOpened = (settings.startOffset > 0) ? 1 : 0;
 
+    const pushDiscardedOffcut = (
+      width: number,
+      sourcePlankId: string | undefined,
+      placement: CarryPlacement | null,
+      fallbackX: number,
+      fallbackY: number,
+      fallbackH: number
+    ) => {
+      if (width <= 0.5) return;
+      wastePieces.push({
+        x: placement ? placement.x : fallbackX,
+        y: placement ? placement.y : fallbackY,
+        w: width,
+        h: placement ? placement.h : fallbackH,
+        type: 'discarded-offcut',
+        sourcePlankId
+      });
+    };
+
+    const flushCarryOverOffcut = (
+      state: LayoutFlowState,
+      fallbackX: number,
+      fallbackY: number,
+      fallbackH: number
+    ) => {
+      pushDiscardedOffcut(
+        state.carryOverOffcut,
+        state.carryOverSourceId,
+        state.carryOverOffcutPlacement,
+        fallbackX,
+        fallbackY,
+        fallbackH
+      );
+      state.carryOverOffcut = 0;
+      state.carryOverSourceId = undefined;
+      state.carryOverOffcutPlacement = null;
+    };
+
     const placeSegment = (
       row: PreparedRow,
       segment: PreparedSegment,
@@ -197,7 +257,10 @@ export const calculateLayout = (
       hasClashPrev?: (jointX: number) => boolean,
       hasClashTwoRowsBack?: (jointX: number) => boolean
     ): number[] => {
-      if (segment.end - segment.start <= 0.1) return [];
+      const segmentLength = segment.end - segment.start;
+      if (segmentLength <= 0.1) return [];
+      const localMinStagger = getEffectiveMinStagger(segmentLength);
+      const localBackRowSpacing = getVisualBackRowSpacing(localMinStagger);
 
       const pushStartSideWaste = (width: number, type: WastePiece['type'], sourcePlankId?: string) => {
         if (width <= 0.5) return;
@@ -212,10 +275,10 @@ export const calculateLayout = (
       };
 
       const clashPrev = hasClashPrev ?? ((jointX: number) =>
-        state.lastRowJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < settings.minStagger)
+        state.lastRowJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < localMinStagger)
       );
       const clashTwoRowsBack = hasClashTwoRowsBack ?? ((jointX: number) =>
-        state.rowBeforeLastJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < (settings.minStagger / 2))
+        state.rowBeforeLastJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < localBackRowSpacing)
       );
 
       const validateConfig = (startLengthToTest: number) => {
@@ -256,7 +319,21 @@ export const calculateLayout = (
         for (let testStart = state.carryOverOffcut; testStart >= settings.minEndPiece; testStart -= 5) {
           if (validateConfig(testStart)) {
             const extraCut = state.carryOverOffcut - testStart;
-            pushStartSideWaste(extraCut, 'start-cut', state.carryOverSourceId);
+            const discardPlacement = state.carryOverOffcutPlacement
+              ? {
+                  x: state.carryOverOffcutPlacement.x,
+                  y: state.carryOverOffcutPlacement.y,
+                  h: state.carryOverOffcutPlacement.h
+                }
+              : null;
+            pushDiscardedOffcut(
+              extraCut,
+              state.carryOverSourceId,
+              discardPlacement,
+              segment.start - extraCut,
+              row.actualRowTop,
+              row.actualRowHeight
+            );
             startLength = testStart;
             startFromOffcut = true;
             currentSourceId = state.carryOverSourceId;
@@ -270,21 +347,12 @@ export const calculateLayout = (
       }
 
       if (!foundStart) {
-        if (state.carryOverOffcut > 0.5) {
-          const discardPlacement = state.carryOverOffcutPlacement;
-          wastePieces.push({
-            x: discardPlacement ? discardPlacement.x : segment.start - state.carryOverOffcut,
-            y: discardPlacement ? discardPlacement.y : row.actualRowTop,
-            w: state.carryOverOffcut,
-            h: discardPlacement ? discardPlacement.h : row.actualRowHeight,
-            type: 'discarded-offcut',
-            sourcePlankId: state.carryOverSourceId
-          });
-        }
-
-        state.carryOverOffcut = 0;
-        state.carryOverSourceId = undefined;
-        state.carryOverOffcutPlacement = null;
+        flushCarryOverOffcut(
+          state,
+          segment.start - state.carryOverOffcut,
+          row.actualRowTop,
+          row.actualRowHeight
+        );
         totalPlanksOpened++;
 
         if (validateConfig(fullPlankLength)) {
@@ -355,7 +423,7 @@ export const calculateLayout = (
           state.carryOverSourceId = plankId;
           state.carryOverOffcutPlacement =
             state.carryOverOffcut > 0.5
-              ? { x: curX + plankLength + 20, y: row.actualRowTop, h: row.actualRowHeight }
+              ? { x: curX + plankLength, y: row.actualRowTop, h: row.actualRowHeight }
               : null;
         } else {
           segmentJoints.push(curX + plankLength);
@@ -517,6 +585,8 @@ export const calculateLayout = (
         const { leftZoneEnd, rightZoneStart } = getRowBoundaries(row.rowIdx);
         const inLeftZone = (jointX: number) => jointX <= leftZoneEnd + twoZonePattern.tolerance;
         const inRightZone = (jointX: number) => jointX >= rightZoneStart - twoZonePattern.tolerance;
+        const bridgeMinStagger = getEffectiveMinStagger(row.segments[0].end - row.segments[0].start);
+        const bridgeBackRowSpacing = getVisualBackRowSpacing(bridgeMinStagger);
 
         const bridgeRowJoints = placeSegment(
           row,
@@ -524,11 +594,11 @@ export const calculateLayout = (
           'bridge',
           bridgeState,
           (jointX) =>
-            (inLeftZone(jointX) && leftState.lastRowJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < settings.minStagger)) ||
-            (inRightZone(jointX) && rightState.lastRowJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < settings.minStagger)),
+            (inLeftZone(jointX) && leftState.lastRowJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < bridgeMinStagger)) ||
+            (inRightZone(jointX) && rightState.lastRowJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < bridgeMinStagger)),
           (jointX) =>
-            (inLeftZone(jointX) && leftState.rowBeforeLastJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < (settings.minStagger / 2))) ||
-            (inRightZone(jointX) && rightState.rowBeforeLastJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < (settings.minStagger / 2)))
+            (inLeftZone(jointX) && leftState.rowBeforeLastJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < bridgeBackRowSpacing)) ||
+            (inRightZone(jointX) && rightState.rowBeforeLastJoints.some((lastJoint) => Math.abs(jointX - lastJoint) < bridgeBackRowSpacing))
         );
 
         const leftBridgeJoints = bridgeRowJoints.filter(inLeftZone);
@@ -544,6 +614,9 @@ export const calculateLayout = (
         commitRowState(leftState, leftBridgeJoints);
         commitRowState(rightState, rightBridgeJoints);
       });
+
+      flushCarryOverOffcut(leftState, baseX, effectiveMaxY - rowHeight, rowHeight);
+      flushCarryOverOffcut(rightState, baseX, effectiveMaxY - rowHeight, rowHeight);
     } else {
       const globalState = createFlowState((settings.startOffset) % settings.length, baseX);
 
@@ -556,6 +629,8 @@ export const calculateLayout = (
         });
         commitRowState(globalState, currentRowJoints);
       });
+
+      flushCarryOverOffcut(globalState, baseX, effectiveMaxY - rowHeight, rowHeight);
     }
 
     return { planks, wastePieces, totalPlanksOpened };
