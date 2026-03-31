@@ -411,6 +411,7 @@ export default function CanvasAdapter({
           showPlanks={showPlanks}
           onTogglePlanks={() => setShowPlanks(p => !p)}
           onResetDesign={onResetDesign}
+          isMobile={typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches}
           onOptimize={handleOptimize}
           onRotate={handleToggleRotate}
           isRotated={settings.layoutRotated}
