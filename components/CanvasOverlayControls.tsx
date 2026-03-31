@@ -225,11 +225,15 @@ function MeasureIcon() {
 }
 
 function PlanksIcon() {
+  // Staggered floorboard pattern: two rows with offset joints
   return (
     <svg className="h-[18px] w-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="2" y="4" width="20" height="4" rx="1" strokeWidth="1.8" />
-      <rect x="2" y="10" width="20" height="4" rx="1" strokeWidth="1.8" />
-      <rect x="2" y="16" width="20" height="4" rx="1" strokeWidth="1.8" />
+      {/* Top row: two planks with joint at x=13 */}
+      <rect x="2" y="3" width="10" height="7" rx="1" strokeWidth="1.7" />
+      <rect x="13" y="3" width="9" height="7" rx="1" strokeWidth="1.7" />
+      {/* Bottom row: two planks with joint at x=8 (offset) */}
+      <rect x="2" y="13" width="5" height="7" rx="1" strokeWidth="1.7" />
+      <rect x="8" y="13" width="14" height="7" rx="1" strokeWidth="1.7" />
     </svg>
   );
 }
