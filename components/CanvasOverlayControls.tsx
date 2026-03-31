@@ -56,6 +56,7 @@ interface ActionButtonProps {
   disabled?: boolean;
   success?: boolean;
   warning?: boolean;
+  danger?: boolean;
   onClick: () => void;
   icon: React.ReactNode;
   title?: string;
@@ -75,6 +76,7 @@ function ActionButton({
   disabled = false,
   success = false,
   warning = false,
+  danger = false,
   onClick,
   icon,
   title,
@@ -89,9 +91,11 @@ function ActionButton({
       ? 'text-[#3D8B37]'
       : warning
         ? 'text-[#C41230]'
-        : active
-          ? 'text-[#1a1a1a]'
-          : 'text-[#5b5b5b] hover:text-[#1a1a1a]';
+        : danger
+          ? 'text-[#C41230] hover:text-[#a00f28]'
+          : active
+            ? 'text-[#1a1a1a]'
+            : 'text-[#5b5b5b] hover:text-[#1a1a1a]';
 
   return (
     <button
@@ -549,12 +553,13 @@ export default function CanvasOverlayControls({
               />
               {onResetDesign && !isLocked && (
                 <>
-                  <div className="my-1 border-t border-[#ececec]" />
+                  <div className="my-1 border-t border-[#c0c0c0]" />
                   <ActionButton
                     label="Återställ design"
                     open={isRailOpen}
                     onClick={onResetDesign}
                     icon={<ResetIcon />}
+                    danger
                   />
                 </>
               )}
