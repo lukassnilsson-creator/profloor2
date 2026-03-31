@@ -352,6 +352,8 @@ export default function CanvasAdapter({
   const maxMinPiece = Math.max(0, settings.length / 2);
 
   const BOTTOM_BAR_H = 56;
+  const isTouchDevice = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches;
+  const effectiveCanvasHeight = isTouchDevice ? containerHeight + 20 : containerHeight;
 
   return (
     <>
@@ -362,7 +364,7 @@ export default function CanvasAdapter({
     >
       {/* Canvas area */}
       <div
-        style={{ height: `${containerHeight}px` }}
+        style={{ height: `${effectiveCanvasHeight}px` }}
         className="rounded-t-xl border border-b-0 border-[#EAE6E3] bg-white relative overflow-hidden"
         onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
         onDrop={(e) => { e.preventDefault(); const file = e.dataTransfer.files[0]; if (file) handleImportFile(file); }}
