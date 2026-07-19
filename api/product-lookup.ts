@@ -1,8 +1,8 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { createClient } from '@supabase/supabase-js';
-import { isHttpUrl, isBlockedHost, isTrustedStoreHost } from '../lib/server/urlSafety';
-import { getClientIp, isRateLimited } from '../lib/server/rateLimit';
+import { isHttpUrl, isBlockedHost, isTrustedStoreHost } from '../lib/server/urlSafety.ts';
+import { getClientIp, isRateLimited } from '../lib/server/rateLimit.ts';
 
 interface ApiRequest {
   method?: string;

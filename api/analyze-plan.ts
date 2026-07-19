@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { getClientIp, isRateLimited } from '../lib/server/rateLimit';
+import { getClientIp, isRateLimited } from '../lib/server/rateLimit.ts';
 
 interface ApiRequest {
   method?: string;
