@@ -1,9 +1,35 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
+// ─── Rate limiting (inlinad — Vercel deployar inte filer utanför api/) ────────
+// In-memory sliding window, state per serverless-instans = "best effort".
+
+const rateLimitHits = new Map<string, number[]>();
+
+const getClientIp = (headers?: Record<string, string | string[] | undefined>): string => {
+  const forwarded = headers?.['x-forwarded-for'];
+  const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  if (!value) return 'unknown';
+  return value.split(',')[0].trim() || 'unknown';
+};
+
+const isRateLimited = (key: string, maxRequests: number, windowMs: number): boolean => {
+  const now = Date.now();
+  const windowStart = now - windowMs;
+  const timestamps = (rateLimitHits.get(key) ?? []).filter((t) => t > windowStart);
+  if (timestamps.length >= maxRequests) {
+    rateLimitHits.set(key, timestamps);
+    return true;
+  }
+  timestamps.push(now);
+  rateLimitHits.set(key, timestamps);
+  return false;
+};
+
 interface ApiRequest {
   method?: string;
   body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
 }
 
 interface ApiResponse {
@@ -38,10 +64,19 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  const clientIp = getClientIp(req.headers);
+  if (isRateLimited(`analyze-plan:${clientIp}`, 5, 60_000)) {
+    return res.status(429).json({ error: 'För många förfrågningar. Vänta en stund och försök igen.' });
+  }
+
   const body = isRecord(req.body) ? req.body : {};
   const image = body.image;
   if (typeof image !== 'string' || !image) {
     return res.status(400).json({ error: 'Missing image data' });
+  }
+
+  if (image.length > 11_000_000) {
+    return res.status(400).json({ error: 'Filen är för stor. Max 8 MB.' });
   }
 
   const dataUrlMatch = image.match(/^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,(.+)$/);

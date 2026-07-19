@@ -1,10 +1,96 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { createClient } from '@supabase/supabase-js';
+// ─── URL-säkerhet + rate limiting (inlinat — Vercel deployar inte filer utanför api/) ──
+
+const isHttpUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+const IPV4_PATTERN = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+
+const isPrivateOrLinkLocalIPv4 = (hostname: string): boolean => {
+  const match = hostname.match(IPV4_PATTERN);
+  if (!match) return false;
+  const [, a, b] = match;
+  const first = Number(a);
+  const second = Number(b);
+  if (first === 127) return true; // loopback
+  if (first === 10) return true; // 10.0.0.0/8
+  if (first === 172 && second >= 16 && second <= 31) return true; // 172.16.0.0/12
+  if (first === 192 && second === 168) return true; // 192.168.0.0/16
+  if (first === 169 && second === 254) return true; // 169.254.0.0/16 (link-local, incl. cloud metadata)
+  return false;
+};
+
+const isBlockedHost = (hostname: string): boolean => {
+  const host = hostname.toLowerCase().trim();
+  if (!host) return true;
+  if (host === 'localhost') return true;
+  if (host.endsWith('.local')) return true;
+  if (host.endsWith('.internal')) return true;
+  if (isPrivateOrLinkLocalIPv4(host)) return true;
+  if (host.includes(':')) return true; // IPv6-literaler (inkl. ::1)
+  return false;
+};
+
+const TRUSTED_STORE_DOMAINS = [
+  'bygghemma.se',
+  'hornbach.se',
+  'hornbach.com',
+  'bauhaus.se',
+  'bauhaus.com',
+  'bau1.com',
+  'clasohlson.com',
+  'clas-ohlson.com',
+  'byggmax.se',
+  'maxbo.se',
+  'kahrs.com',
+  'pergo.com',
+  'tarkett.com',
+  'boen.com',
+  'bricmate.se',
+  'ellos.se',
+  'golvlageret.se',
+];
+
+const isTrustedStoreHost = (hostname: string): boolean => {
+  const host = hostname.toLowerCase().trim();
+  return TRUSTED_STORE_DOMAINS.some((d) => host === d || host.endsWith('.' + d));
+};
+
+// In-memory sliding window, state per serverless-instans = "best effort".
+const rateLimitHits = new Map<string, number[]>();
+
+const getClientIp = (headers?: Record<string, string | string[] | undefined>): string => {
+  const forwarded = headers?.['x-forwarded-for'];
+  const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  if (!value) return 'unknown';
+  return value.split(',')[0].trim() || 'unknown';
+};
+
+const isRateLimited = (key: string, maxRequests: number, windowMs: number): boolean => {
+  const now = Date.now();
+  const windowStart = now - windowMs;
+  const timestamps = (rateLimitHits.get(key) ?? []).filter((t) => t > windowStart);
+  if (timestamps.length >= maxRequests) {
+    rateLimitHits.set(key, timestamps);
+    return true;
+  }
+  timestamps.push(now);
+  rateLimitHits.set(key, timestamps);
+  return false;
+};
 
 interface ApiRequest {
   method?: string;
   body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
 }
 
 interface ApiResponse {
@@ -121,8 +207,16 @@ const toLookupResult = (value: Record<string, unknown>): ProductLookupResult | n
 
 const getSupabase = (): Supabase | null => {
   const url = process.env.VITE_SUPABASE_URL;
-  const key = process.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url) return null;
+
+  const key = serviceRoleKey ?? anonKey;
+  if (!key) return null;
+  if (!serviceRoleKey) {
+    console.warn('[product-lookup] SUPABASE_SERVICE_ROLE_KEY missing, falling back to anon key for product_cache');
+  }
+
   return createClient(url, key, { auth: { persistSession: false } }) as unknown as Supabase;
 };
 
@@ -436,11 +530,33 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  const clientIp = getClientIp(req.headers);
+  if (isRateLimited(`product-lookup:${clientIp}`, 10, 60_000)) {
+    return res.status(429).json({ error: 'För många förfrågningar. Vänta en stund och försök igen.' });
+  }
+
   const body = isRecord(req.body) ? req.body : {};
   const productUrl = body.productUrl;
   if (typeof productUrl !== 'string' || !productUrl) {
     return res.status(400).json({ error: 'Missing product URL' });
   }
+
+  if (!isHttpUrl(productUrl)) {
+    return res.status(400).json({ error: 'Invalid product URL' });
+  }
+
+  let productUrlHostname: string;
+  try {
+    productUrlHostname = new URL(productUrl).hostname;
+  } catch {
+    return res.status(400).json({ error: 'Invalid product URL' });
+  }
+
+  if (isBlockedHost(productUrlHostname)) {
+    return res.status(400).json({ error: 'Invalid product URL' });
+  }
+
+  const canFetchHtml = isTrustedStoreHost(productUrlHostname);
 
   try {
     const apiKey = process.env.GEMINI_API_KEY ?? process.env.API_KEY;
@@ -469,7 +585,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
       let imageUrl = cached.image_url;
 
-      const html = await fetchHtml(productUrl);
+      const html = canFetchHtml ? await fetchHtml(productUrl) : null;
       if (html) {
         const { price, currency: cur, stock } = extractPriceFromHtml(html);
         if (price) pricePerPackage = price;
@@ -525,7 +641,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     console.log('[product-lookup] cache miss, full lookup:', productUrl);
 
     // Fast path: fetch HTML → JSON-LD + Gemini for dimensions
-    const html = await fetchHtml(productUrl);
+    const html = canFetchHtml ? await fetchHtml(productUrl) : null;
 
     if (html) {
       const jsonLd = extractJsonLd(html);

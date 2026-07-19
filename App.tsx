@@ -504,6 +504,75 @@ const parseFloorDesign = (item: unknown, index: number): FloorDesign | null => {
   };
 };
 
+interface ParsedSharedPayload {
+  name?: string;
+  points?: Point[];
+  settings?: PlankSettings;
+  products: SavedProduct[];
+  activeProductId?: string | null;
+  productSettingsById?: Record<string, ProductDesignSettings>;
+  backgroundDrawing?: ImportedDrawingBackground | null;
+  showBackgroundDrawing?: boolean;
+  backgroundOpacity?: number;
+  isLocked?: boolean;
+}
+
+const parseSharedPayload = (raw: unknown): ParsedSharedPayload => {
+  const value = isRecord(raw) ? raw : {};
+  const result: ParsedSharedPayload = { products: [] };
+
+  const rawProducts = Array.isArray(value.products)
+    ? value.products
+    : Array.isArray(value.savedProducts)
+      ? value.savedProducts // legacy
+      : [];
+  result.products = rawProducts
+    .map(parseSavedProduct)
+    .filter((p): p is SavedProduct => p !== null)
+    .slice(0, 5);
+
+  if (Array.isArray(value.points)) {
+    const parsedPoints = value.points.map(parsePoint).filter((p): p is Point => p !== null);
+    if (parsedPoints.length >= 3) {
+      result.points = parsedPoints;
+    }
+  }
+
+  if (value.settings !== undefined) {
+    result.settings = sanitizePlankSettings(value.settings);
+  }
+
+  if (typeof value.activeProductId === 'string' || value.activeProductId === null) {
+    result.activeProductId = value.activeProductId;
+  }
+
+  if (value.productSettingsById !== undefined) {
+    result.productSettingsById = parseProductSettingsById(value.productSettingsById);
+  }
+
+  if (value.backgroundDrawing !== undefined) {
+    result.backgroundDrawing = parseImportedDrawingBackground(value.backgroundDrawing);
+  }
+
+  if (typeof value.showBackgroundDrawing === 'boolean') {
+    result.showBackgroundDrawing = value.showBackgroundDrawing;
+  }
+
+  if (isFiniteNumber(value.backgroundOpacity)) {
+    result.backgroundOpacity = Math.max(0, Math.min(1, value.backgroundOpacity));
+  }
+
+  if (typeof value.name === 'string' && value.name.trim()) {
+    result.name = value.name.trim().slice(0, MAX_DESIGN_NAME_LENGTH);
+  }
+
+  if (value.isLocked === true) {
+    result.isLocked = true;
+  }
+
+  return result;
+};
+
 const loadFloorDesignState = (): FloorDesignState => {
   const defaultDesign = createDefaultDesign('Golv 1');
   if (typeof window === 'undefined') {
@@ -623,37 +692,36 @@ const App: React.FC = () => {
       .single()
       .then(({ data, error }) => {
         if (error || !data?.floor_data) return;
-        const payload = data.floor_data as {
-          name?: string;
-          points?: Point[];
-          settings?: PlankSettings;
-          products?: SavedProduct[];
-          savedProducts?: SavedProduct[]; // legacy
-          activeProductId?: string | null;
-          productSettingsById?: Record<string, ProductDesignSettings>;
-          backgroundDrawing?: ImportedDrawingBackground | null;
-          showBackgroundDrawing?: boolean;
-          backgroundOpacity?: number;
-          isLocked?: boolean;
-        };
-        const restoredProducts = (payload.products ?? payload.savedProducts ?? [])
-          .map(parseSavedProduct).filter((p): p is SavedProduct => p !== null).slice(0, 5);
+        const payload = parseSharedPayload(data.floor_data);
+        const hasAnyField =
+          payload.name !== undefined ||
+          payload.points !== undefined ||
+          payload.settings !== undefined ||
+          payload.activeProductId !== undefined ||
+          payload.productSettingsById !== undefined ||
+          payload.backgroundDrawing !== undefined ||
+          payload.showBackgroundDrawing !== undefined ||
+          payload.backgroundOpacity !== undefined ||
+          payload.isLocked !== undefined ||
+          payload.products.length > 0;
+        if (!hasAnyField) return;
+
         setDesignState((prev) => ({
           ...prev,
           designs: prev.designs.map((d) =>
             d.id === prev.activeDesignId
               ? {
                   ...d,
-                  ...(payload.name ? { name: payload.name } : {}),
-                  ...(payload.points ? { points: payload.points } : {}),
-                  ...(payload.settings ? { settings: payload.settings } : {}),
+                  ...(payload.name !== undefined ? { name: payload.name } : {}),
+                  ...(payload.points !== undefined ? { points: payload.points } : {}),
+                  ...(payload.settings !== undefined ? { settings: payload.settings } : {}),
                   ...(payload.activeProductId !== undefined ? { activeProductId: payload.activeProductId } : {}),
-                  ...(payload.productSettingsById ? { productSettingsById: payload.productSettingsById } : {}),
+                  ...(payload.productSettingsById !== undefined ? { productSettingsById: payload.productSettingsById } : {}),
                   ...(payload.backgroundDrawing !== undefined ? { backgroundDrawing: payload.backgroundDrawing } : {}),
                   ...(payload.showBackgroundDrawing !== undefined ? { showBackgroundDrawing: payload.showBackgroundDrawing } : {}),
                   ...(payload.backgroundOpacity !== undefined ? { backgroundOpacity: payload.backgroundOpacity } : {}),
-                  ...(payload.isLocked !== undefined ? { isLocked: payload.isLocked === true } : {}),
-                  products: restoredProducts,
+                  ...(payload.isLocked !== undefined ? { isLocked: payload.isLocked } : {}),
+                  products: payload.products,
                 }
               : d
           ),
@@ -669,31 +737,31 @@ const App: React.FC = () => {
     if (!hash.startsWith('s=')) return;
     const encoded = hash.slice(2);
     try {
-      const payload = decodeSharePayload(encoded) as {
-        name?: string;
-        points?: Point[];
-        settings?: PlankSettings;
-        products?: SavedProduct[];
-        savedProducts?: SavedProduct[]; // legacy
-        activeProductId?: string | null;
-        productSettingsById?: Record<string, ProductDesignSettings>;
-        isLocked?: boolean;
-      };
-      const restoredProducts = (payload.products ?? payload.savedProducts ?? [])
-        .map(parseSavedProduct).filter((p): p is SavedProduct => p !== null).slice(0, 5);
+      const decoded = decodeSharePayload(encoded);
+      const payload = parseSharedPayload(decoded);
+      const hasAnyField =
+        payload.name !== undefined ||
+        payload.points !== undefined ||
+        payload.settings !== undefined ||
+        payload.activeProductId !== undefined ||
+        payload.productSettingsById !== undefined ||
+        payload.isLocked !== undefined ||
+        payload.products.length > 0;
+      if (!hasAnyField) return;
+
       setDesignState((prev) => ({
         ...prev,
         designs: prev.designs.map((d) =>
           d.id === prev.activeDesignId
             ? {
                 ...d,
-                ...(payload.name ? { name: payload.name } : {}),
-                ...(payload.points ? { points: payload.points } : {}),
-                ...(payload.settings ? { settings: payload.settings } : {}),
+                ...(payload.name !== undefined ? { name: payload.name } : {}),
+                ...(payload.points !== undefined ? { points: payload.points } : {}),
+                ...(payload.settings !== undefined ? { settings: payload.settings } : {}),
                 ...(payload.activeProductId !== undefined ? { activeProductId: payload.activeProductId } : {}),
-                ...(payload.productSettingsById ? { productSettingsById: payload.productSettingsById } : {}),
-                ...(payload.isLocked !== undefined ? { isLocked: payload.isLocked === true } : {}),
-                products: restoredProducts,
+                ...(payload.productSettingsById !== undefined ? { productSettingsById: payload.productSettingsById } : {}),
+                ...(payload.isLocked !== undefined ? { isLocked: payload.isLocked } : {}),
+                products: payload.products,
               }
             : d
         ),
