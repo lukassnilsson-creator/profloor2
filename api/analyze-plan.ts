@@ -1,6 +1,30 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { getClientIp, isRateLimited } from '../lib/server/rateLimit.ts';
+
+// ─── Rate limiting (inlinad — Vercel deployar inte filer utanför api/) ────────
+// In-memory sliding window, state per serverless-instans = "best effort".
+
+const rateLimitHits = new Map<string, number[]>();
+
+const getClientIp = (headers?: Record<string, string | string[] | undefined>): string => {
+  const forwarded = headers?.['x-forwarded-for'];
+  const value = Array.isArray(forwarded) ? forwarded[0] : forwarded;
+  if (!value) return 'unknown';
+  return value.split(',')[0].trim() || 'unknown';
+};
+
+const isRateLimited = (key: string, maxRequests: number, windowMs: number): boolean => {
+  const now = Date.now();
+  const windowStart = now - windowMs;
+  const timestamps = (rateLimitHits.get(key) ?? []).filter((t) => t > windowStart);
+  if (timestamps.length >= maxRequests) {
+    rateLimitHits.set(key, timestamps);
+    return true;
+  }
+  timestamps.push(now);
+  rateLimitHits.set(key, timestamps);
+  return false;
+};
 
 interface ApiRequest {
   method?: string;
