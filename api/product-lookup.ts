@@ -1,10 +1,13 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 import { createClient } from '@supabase/supabase-js';
+import { isHttpUrl, isBlockedHost, isTrustedStoreHost } from '../lib/server/urlSafety';
+import { getClientIp, isRateLimited } from '../lib/server/rateLimit';
 
 interface ApiRequest {
   method?: string;
   body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
 }
 
 interface ApiResponse {
@@ -436,11 +439,33 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  const clientIp = getClientIp(req.headers);
+  if (isRateLimited(`product-lookup:${clientIp}`, 10, 60_000)) {
+    return res.status(429).json({ error: 'För många förfrågningar. Vänta en stund och försök igen.' });
+  }
+
   const body = isRecord(req.body) ? req.body : {};
   const productUrl = body.productUrl;
   if (typeof productUrl !== 'string' || !productUrl) {
     return res.status(400).json({ error: 'Missing product URL' });
   }
+
+  if (!isHttpUrl(productUrl)) {
+    return res.status(400).json({ error: 'Invalid product URL' });
+  }
+
+  let productUrlHostname: string;
+  try {
+    productUrlHostname = new URL(productUrl).hostname;
+  } catch {
+    return res.status(400).json({ error: 'Invalid product URL' });
+  }
+
+  if (isBlockedHost(productUrlHostname)) {
+    return res.status(400).json({ error: 'Invalid product URL' });
+  }
+
+  const canFetchHtml = isTrustedStoreHost(productUrlHostname);
 
   try {
     const apiKey = process.env.GEMINI_API_KEY ?? process.env.API_KEY;
@@ -469,7 +494,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
       let imageUrl = cached.image_url;
 
-      const html = await fetchHtml(productUrl);
+      const html = canFetchHtml ? await fetchHtml(productUrl) : null;
       if (html) {
         const { price, currency: cur, stock } = extractPriceFromHtml(html);
         if (price) pricePerPackage = price;
@@ -525,7 +550,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     console.log('[product-lookup] cache miss, full lookup:', productUrl);
 
     // Fast path: fetch HTML → JSON-LD + Gemini for dimensions
-    const html = await fetchHtml(productUrl);
+    const html = canFetchHtml ? await fetchHtml(productUrl) : null;
 
     if (html) {
       const jsonLd = extractJsonLd(html);

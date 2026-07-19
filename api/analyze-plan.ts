@@ -1,9 +1,11 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
+import { getClientIp, isRateLimited } from '../lib/server/rateLimit';
 
 interface ApiRequest {
   method?: string;
   body?: unknown;
+  headers?: Record<string, string | string[] | undefined>;
 }
 
 interface ApiResponse {
@@ -38,10 +40,19 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
+  const clientIp = getClientIp(req.headers);
+  if (isRateLimited(`analyze-plan:${clientIp}`, 5, 60_000)) {
+    return res.status(429).json({ error: 'För många förfrågningar. Vänta en stund och försök igen.' });
+  }
+
   const body = isRecord(req.body) ? req.body : {};
   const image = body.image;
   if (typeof image !== 'string' || !image) {
     return res.status(400).json({ error: 'Missing image data' });
+  }
+
+  if (image.length > 11_000_000) {
+    return res.status(400).json({ error: 'Filen är för stor. Max 8 MB.' });
   }
 
   const dataUrlMatch = image.match(/^data:([a-zA-Z0-9.+-]+\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
