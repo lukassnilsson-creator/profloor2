@@ -124,8 +124,16 @@ const toLookupResult = (value: Record<string, unknown>): ProductLookupResult | n
 
 const getSupabase = (): Supabase | null => {
   const url = process.env.VITE_SUPABASE_URL;
-  const key = process.env.VITE_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
+  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const anonKey = process.env.VITE_SUPABASE_ANON_KEY;
+  if (!url) return null;
+
+  const key = serviceRoleKey ?? anonKey;
+  if (!key) return null;
+  if (!serviceRoleKey) {
+    console.warn('[product-lookup] SUPABASE_SERVICE_ROLE_KEY missing, falling back to anon key for product_cache');
+  }
+
   return createClient(url, key, { auth: { persistSession: false } }) as unknown as Supabase;
 };
 
