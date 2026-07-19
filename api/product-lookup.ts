@@ -51,26 +51,89 @@ interface CacheRow {
   is_campaign_price: boolean;
 }
 
+interface ProductLookupResult {
+  productName: string;
+  lengthMm: number;
+  widthMm: number;
+  thicknessMm?: number;
+  planksPerPackage: number;
+  imageUrl?: string;
+  pricePerPackage: number;
+  currency: string;
+  stockStatus?: string;
+  deliveryEstimate?: string;
+  isCampaignPrice: boolean;
+}
+
+interface ProductCacheTable {
+  select: (columns: string) => {
+    eq: (column: string, value: string) => {
+      maybeSingle: () => Promise<{ data: CacheRow | null; error: unknown }>;
+    };
+  };
+  upsert: (payload: CacheRow, options: { onConflict: string }) => Promise<unknown>;
+  update: (payload: Partial<CacheRow>) => {
+    eq: (column: string, value: string) => Promise<unknown>;
+  };
+}
+
+interface Supabase {
+  from: (relation: 'product_cache') => ProductCacheTable;
+}
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object';
 
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim().length > 0;
+
+const isPositiveNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0;
+
+const toLookupResult = (value: Record<string, unknown>): ProductLookupResult | null => {
+  const productName = isNonEmptyString(value.productName) ? value.productName : null;
+  const lengthMm = isPositiveNumber(value.lengthMm) ? value.lengthMm : null;
+  const widthMm = isPositiveNumber(value.widthMm) ? value.widthMm : null;
+  const planksPerPackage = isPositiveNumber(value.planksPerPackage) ? value.planksPerPackage : null;
+  const pricePerPackage = isPositiveNumber(value.pricePerPackage) ? value.pricePerPackage : null;
+  const currency = isNonEmptyString(value.currency) ? value.currency : null;
+
+  if (!productName || !lengthMm || !widthMm || !planksPerPackage || !pricePerPackage || !currency) {
+    return null;
+  }
+
+  return {
+    productName,
+    lengthMm,
+    widthMm,
+    thicknessMm: isPositiveNumber(value.thicknessMm) ? value.thicknessMm : undefined,
+    planksPerPackage,
+    imageUrl: isNonEmptyString(value.imageUrl) ? value.imageUrl : undefined,
+    pricePerPackage,
+    currency,
+    stockStatus: isNonEmptyString(value.stockStatus) ? value.stockStatus : undefined,
+    deliveryEstimate: isNonEmptyString(value.deliveryEstimate) ? value.deliveryEstimate : undefined,
+    isCampaignPrice: typeof value.isCampaignPrice === 'boolean' ? value.isCampaignPrice : false,
+  };
+};
+
 // ─── Supabase cache ───────────────────────────────────────────────────────────
 
-const getSupabase = () => {
+const getSupabase = (): Supabase | null => {
   const url = process.env.VITE_SUPABASE_URL;
   const key = process.env.VITE_SUPABASE_ANON_KEY;
   if (!url || !key) return null;
-  return createClient(url, key, { auth: { persistSession: false } });
+  return createClient(url, key, { auth: { persistSession: false } }) as unknown as Supabase;
 };
 
-const getCached = async (sb: ReturnType<typeof createClient>, url: string): Promise<CacheRow | null> => {
+const getCached = async (sb: Supabase, url: string): Promise<CacheRow | null> => {
   const { data, error } = await sb.from('product_cache').select('*').eq('url', url).maybeSingle();
   if (error || !data) return null;
-  return data as CacheRow;
+  return data;
 };
 
-const saveCache = async (sb: ReturnType<typeof createClient>, url: string, d: Record<string, unknown>) => {
-  await sb.from('product_cache').upsert({
+const saveCache = async (sb: Supabase, url: string, d: ProductLookupResult) => {
+  const payload: CacheRow = {
     url,
     name: d.productName,
     length_mm: d.lengthMm,
@@ -82,21 +145,23 @@ const saveCache = async (sb: ReturnType<typeof createClient>, url: string, d: Re
     currency: d.currency,
     stock_status: d.stockStatus ?? null,
     delivery_estimate: d.deliveryEstimate ?? null,
-    is_campaign_price: d.isCampaignPrice ?? false,
-  }, { onConflict: 'url' });
+    is_campaign_price: d.isCampaignPrice,
+  };
+  await sb.from('product_cache').upsert(payload, { onConflict: 'url' });
 };
 
-const updateCachePrice = async (sb: ReturnType<typeof createClient>, url: string, d: {
+const updateCachePrice = async (sb: Supabase, url: string, d: {
   pricePerPackage: number; currency: string; stockStatus: string | null;
   deliveryEstimate: string | null; isCampaignPrice: boolean;
 }) => {
-  await sb.from('product_cache').update({
+  const payload: Partial<CacheRow> = {
     price_per_package: d.pricePerPackage,
     currency: d.currency,
     stock_status: d.stockStatus,
     delivery_estimate: d.deliveryEstimate,
     is_campaign_price: d.isCampaignPrice,
-  }).eq('url', url);
+  };
+  await sb.from('product_cache').update(payload).eq('url', url);
 };
 
 // ─── HTML fetching ────────────────────────────────────────────────────────────
@@ -415,7 +480,13 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           const jsonLd = extractJsonLd(html);
           imageUrl = resolveImage(html, jsonLd, productUrl);
           if (imageUrl && sb) {
-            sb.from('product_cache').update({ image_url: imageUrl }).eq('url', productUrl).catch(() => {});
+            void (async () => {
+              try {
+                await sb.from('product_cache').update({ image_url: imageUrl }).eq('url', productUrl);
+              } catch {
+                // Non-critical cache backfill.
+              }
+            })();
           }
         }
       } else {
@@ -483,7 +554,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           needPrice: !priceFromLd || !currencyFromLd,
         });
 
-        const result = {
+        const rawResult: Record<string, unknown> = {
           productName: nameFromLd ?? dimensions.productName,
           lengthMm: dimensions.lengthMm,
           widthMm: dimensions.widthMm,
@@ -497,11 +568,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
           imageUrl: imageUrl ?? undefined,
         };
 
-        const hasPrice = typeof result.pricePerPackage === 'number' && result.pricePerPackage > 0;
-        const hasDimensions = result.lengthMm > 0 && result.widthMm > 0;
-        if (!hasPrice || !hasDimensions) throw new Error('Fast path returned incomplete data');
+        const result = toLookupResult(rawResult);
+        if (!result) throw new Error('Fast path returned incomplete data');
 
-        if (sb) saveCache(sb, productUrl, result).catch(() => { /* non-critical */ });
+        if (sb) void saveCache(sb, productUrl, result).catch(() => { /* non-critical */ });
         return res.status(200).json(result);
       } catch (fastErr) {
         console.error('Fast path failed, falling back to search:', fastErr);
@@ -516,13 +586,16 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
       }
 
       try {
-        const data = await extractWithGeminiSearch(ai, productUrl);
+        const rawData = await extractWithGeminiSearch(ai, productUrl);
 
-        if (!data.imageUrl && html) {
-          data.imageUrl = resolveImage(html, null, productUrl);
+        if (!rawData.imageUrl && html) {
+          rawData.imageUrl = resolveImage(html, null, productUrl);
         }
 
-        if (sb) saveCache(sb, productUrl, data).catch(() => { /* non-critical */ });
+        const data = toLookupResult(rawData);
+        if (!data) throw new Error('Search fallback returned incomplete data');
+
+        if (sb) void saveCache(sb, productUrl, data).catch(() => { /* non-critical */ });
         return res.status(200).json(data);
       } catch (error: unknown) {
         const { isUnavailableError } = getErrorInfo(error);

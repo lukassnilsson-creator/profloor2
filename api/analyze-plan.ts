@@ -49,8 +49,10 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
     return res.status(400).json({ error: 'Invalid file format. Expected a base64 data URL (for example data:image/...;base64,... or data:application/pdf;base64,...)' });
   }
 
-  const mimeType = dataUrlMatch[1];
-  const base64Data = dataUrlMatch[2];
+  const [, mimeType, base64Data] = dataUrlMatch;
+  if (!mimeType || !base64Data) {
+    return res.status(400).json({ error: 'Invalid file format. Missing mime type or file data.' });
+  }
 
   try {
     const apiKey = process.env.GEMINI_API_KEY ?? process.env.API_KEY;
@@ -113,6 +115,9 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
       try {
         const response = await ai.models.generateContent(requestPayload);
+        if (!response.text) {
+          throw new Error('Empty Gemini response');
+        }
         return res.status(200).json(JSON.parse(response.text));
       } catch (error: unknown) {
         const { isUnavailableError } = getErrorInfo(error);
