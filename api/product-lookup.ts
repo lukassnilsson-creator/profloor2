@@ -368,24 +368,58 @@ const extractOgImage = (html: string, baseUrl?: string): string | null => {
   for (const p of metaPatterns) {
     const m = html.match(p);
     if (m?.[1]) {
-      const abs = toAbsolute(m[1], baseUrl);
+      // HTML-attribut är entity-kodade (&amp; → &) — annars korrupta query-parametrar
+      const abs = toAbsolute(decodeHtml(m[1]), baseUrl);
       if (abs) return abs;
     }
   }
   const microdata = html.match(/itemprop=["']image["'][^>]+content=["']([^"']+)["']/i)
     ?? html.match(/content=["']([^"']+)["'][^>]+itemprop=["']image["']/i);
   if (microdata?.[1]) {
-    const abs = toAbsolute(microdata[1], baseUrl);
+    const abs = toAbsolute(decodeHtml(microdata[1]), baseUrl);
     if (abs) return abs;
   }
   return null;
 };
 
-const resolveImage = (html: string, jsonLd: JsonLdProduct | null, baseUrl: string): string | null => {
+// Vissa butikers og:image pekar på döda adresser (t.ex. Bygghemmas /pimages/-format).
+// Verifiera att URL:en faktiskt svarar med en bild innan den cachas.
+const isWorkingImageUrl = async (url: string): Promise<boolean> => {
+  try {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol) || isBlockedHost(parsed.hostname)) {
+      return false;
+    }
+  } catch {
+    return false;
+  }
+  for (const method of ['HEAD', 'GET'] as const) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5000);
+      const res = await fetch(url, { method, redirect: 'follow', signal: controller.signal });
+      clearTimeout(timer);
+      if (res.ok && (res.headers.get('content-type') ?? '').startsWith('image/')) return true;
+      if (res.status !== 405 && res.status !== 501) return false; // HEAD stöds ej → prova GET
+    } catch {
+      return false;
+    }
+  }
+  return false;
+};
+
+const resolveImage = async (html: string, jsonLd: JsonLdProduct | null, baseUrl: string): Promise<string | null> => {
+  const candidates: string[] = [];
   const og = extractOgImage(html, baseUrl);
-  if (og) return og;
+  if (og) candidates.push(og);
   const ld = jsonLd?.image ? (Array.isArray(jsonLd.image) ? jsonLd.image[0] : jsonLd.image) : null;
-  if (typeof ld === 'string' && ld) return toAbsolute(ld, baseUrl) ?? ld;
+  if (typeof ld === 'string' && ld) {
+    const abs = toAbsolute(ld, baseUrl) ?? ld;
+    if (!candidates.includes(abs)) candidates.push(abs);
+  }
+  for (const candidate of candidates) {
+    if (await isWorkingImageUrl(candidate)) return candidate;
+  }
   return null;
 };
 
@@ -594,7 +628,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         // Backfill image if it was missing when originally cached
         if (!imageUrl) {
           const jsonLd = extractJsonLd(html);
-          imageUrl = resolveImage(html, jsonLd, productUrl);
+          imageUrl = await resolveImage(html, jsonLd, productUrl);
           if (imageUrl && sb) {
             void (async () => {
               try {
@@ -645,7 +679,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
 
     if (html) {
       const jsonLd = extractJsonLd(html);
-      const imageUrl = resolveImage(html, jsonLd, productUrl);
+      const imageUrl = await resolveImage(html, jsonLd, productUrl);
       console.log('[product-lookup] image sources:', { url: productUrl, imageUrl });
       const productText = extractRelevantText(html);
 
@@ -705,7 +739,7 @@ export default async function handler(req: ApiRequest, res: ApiResponse) {
         const rawData = await extractWithGeminiSearch(ai, productUrl);
 
         if (!rawData.imageUrl && html) {
-          rawData.imageUrl = resolveImage(html, null, productUrl);
+          rawData.imageUrl = await resolveImage(html, null, productUrl);
         }
 
         const data = toLookupResult(rawData);
